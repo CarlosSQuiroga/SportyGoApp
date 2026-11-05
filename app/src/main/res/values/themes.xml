@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.SportyGoApp" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0B131D</item>
+    </style>
+</resources>

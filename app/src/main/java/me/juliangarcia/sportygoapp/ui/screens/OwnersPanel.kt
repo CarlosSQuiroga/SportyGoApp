@@ -20,9 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.VideoLibrary
@@ -30,6 +32,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +51,7 @@ private val DarkBackground = Color(0xFF0B131D)
 private val DarkCardBackground = Color(0xFF111A24)
 private val DarkPillBackground = Color(0xFF131E2B)
 private val PrimaryGreen = Color(0xFF64F089)
+private val WarningYellow = Color(0xFFE5B83B)
 private val TextWhite = Color(0xFFFFFFFF)
 private val TextSecondary = Color(0xFF8C9BAE)
 
@@ -71,7 +75,12 @@ fun OwnersPanelScreen(
     ingresosSemana: List<Pair<String, Float>> = listOf("L", "M", "M", "J", "V", "S", "D").map { it to 0f },
     filtroIngresosTab: String = "Semana",
     tabBottomActual: String = "Inicio",
+    hayNotificacionesSinLeer: Boolean = false,
+    /** false si el dueño no tiene Nequi: la cancha no aparece para los jugadores. */
+    canchaActiva: Boolean = true,
+    onRegistrarNequiClick: () -> Unit = {},
     // Callbacks para eventos e interacción futura
+    onNotificacionesClick: () -> Unit = {},
     onFiltroIngresosTabClick: (String) -> Unit = {},
     onInventarioClick: () -> Unit = {},
     onBottomNavTabClick: (String) -> Unit = {}
@@ -91,13 +100,37 @@ fun OwnersPanelScreen(
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                // Título principal
-                Text(
-                    text = "Panel del dueño",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextWhite
-                )
+                // Título principal y acceso a las notificaciones (reservas recibidas)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Panel del dueño",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextWhite,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onNotificacionesClick) {
+                        Box {
+                            Icon(
+                                imageVector = Icons.Outlined.Notifications,
+                                contentDescription = "Notificaciones",
+                                tint = TextWhite
+                            )
+                            if (hayNotificacionesSinLeer) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(PrimaryGreen)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -105,19 +138,62 @@ fun OwnersPanelScreen(
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val colorEstado = if (canchaActiva) PrimaryGreen else WarningYellow
                     Box(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(PrimaryGreen)
+                            .background(colorEstado)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = nombreCancha,
+                        text = if (canchaActiva) nombreCancha else "$nombreCancha · inactiva",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
-                        color = PrimaryGreen
+                        color = colorEstado
                     )
+                }
+
+                // Sin Nequi no hay a dónde enviar los pagos: la cancha no se muestra a los jugadores.
+                if (!canchaActiva) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Card(
+                        onClick = onRegistrarNequiClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = WarningYellow.copy(alpha = 0.12f)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = WarningYellow
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Tu cancha no está activa",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextWhite
+                                )
+                                Text(
+                                    text = "Registra tu número Nequi para recibir los pagos y que " +
+                                        "los jugadores puedan reservar.",
+                                    fontSize = 13.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Registrar Nequi",
+                                tint = WarningYellow
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))

@@ -128,6 +128,18 @@ class AuthRepository(private val storage: AccountStorage) {
         return actualizado
     }
 
+    fun actualizarNequi(usuarioId: String, nequi: String?): User? {
+        val usuarios = storage.loadUsers().toMutableList()
+        val indice = usuarios.indexOfFirst { it.id == usuarioId }
+        if (indice < 0) return null
+        val actualizado = usuarios[indice].copy(nequi = nequi)
+        usuarios[indice] = actualizado
+        storage.saveUsers(usuarios)
+        return actualizado
+    }
+
+    fun usuarioPorId(id: String): User? = storage.loadUsers().firstOrNull { it.id == id }
+
     // ---------- Canchas ----------
 
     fun canchaDe(ownerId: String): Cancha? =
@@ -144,6 +156,21 @@ class AuthRepository(private val storage: AccountStorage) {
         storage.saveCanchas(otras + cancha)
     }
 
+    // ---------- Productos del kiosco ----------
+
+    fun productosDeCancha(canchaId: String): List<Producto> =
+        storage.loadProductos().filter { it.canchaId == canchaId }
+
+    /** Crea el producto o lo reemplaza si ya existe uno con el mismo id. */
+    fun guardarProducto(producto: Producto) {
+        val otros = storage.loadProductos().filter { it.id != producto.id }
+        storage.saveProductos(otros + producto)
+    }
+
+    fun eliminarProducto(id: String) {
+        storage.saveProductos(storage.loadProductos().filter { it.id != id })
+    }
+
     // ---------- Reservas ----------
 
     fun reservasDeUsuario(usuarioId: String): List<Reserva> =
@@ -156,12 +183,57 @@ class AuthRepository(private val storage: AccountStorage) {
         storage.saveReservas(storage.loadReservas() + reserva)
     }
 
+    fun reservaPorId(id: String): Reserva? = storage.loadReservas().firstOrNull { it.id == id }
+
+    fun actualizarReserva(reserva: Reserva) {
+        storage.saveReservas(storage.loadReservas().map { if (it.id == reserva.id) reserva else it })
+    }
+
+    /** Todas las reservas hechas en este teléfono (para reprogramar los avisos). */
+    fun todasLasReservas(): List<Reserva> = storage.loadReservas()
+
     // ---------- Grabaciones ----------
 
     fun grabacionesDeUsuario(usuarioId: String): List<Grabacion> =
         storage.loadGrabaciones().filter { it.usuarioId == usuarioId }
 
+    fun grabacionPorId(id: String): Grabacion? =
+        storage.loadGrabaciones().firstOrNull { it.id == id }
+
+    fun reservaYaGrabada(reservaId: String): Boolean =
+        storage.loadGrabaciones().any { it.reservaId == reservaId }
+
     fun guardarGrabacion(grabacion: Grabacion) {
         storage.saveGrabaciones(storage.loadGrabaciones() + grabacion)
+    }
+
+    fun reservasSinGrabar(): Set<String> = storage.loadReservasSinGrabar()
+
+    fun marcarSinGrabar(reservaId: String) {
+        storage.saveReservasSinGrabar(storage.loadReservasSinGrabar() + reservaId)
+    }
+
+    // ---------- Notificaciones ----------
+
+    fun notificacionesDe(usuarioId: String): List<Notificacion> =
+        storage.loadNotificaciones()
+            .filter { it.usuarioId == usuarioId }
+            .sortedByDescending { it.creadaEn }
+
+    fun guardarNotificacion(notificacion: Notificacion) {
+        storage.saveNotificaciones(storage.loadNotificaciones() + notificacion)
+    }
+
+    /** Aplica [cambio] a las notificaciones de [usuarioId] que cumplan [filtro]. */
+    fun actualizarNotificaciones(
+        usuarioId: String,
+        filtro: (Notificacion) -> Boolean,
+        cambio: (Notificacion) -> Notificacion
+    ) {
+        storage.saveNotificaciones(
+            storage.loadNotificaciones().map {
+                if (it.usuarioId == usuarioId && filtro(it)) cambio(it) else it
+            }
+        )
     }
 }

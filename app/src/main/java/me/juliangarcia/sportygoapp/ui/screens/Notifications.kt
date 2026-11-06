@@ -64,7 +64,8 @@ data class NotificacionItem(
     val descripcion: String,
     val tiempo: String,
     val icon: ImageVector,
-    val iconTint: Color
+    val iconTint: Color,
+    val leida: Boolean = true
 )
 
 @Composable
@@ -255,6 +256,18 @@ private fun NotificacionRowItem(
                 text = item.tiempo,
                 fontSize = 12.sp,
                 color = TextTime
+            )
+        }
+
+        // Punto verde = notificación sin leer
+        if (!item.leida) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(PrimaryGreen)
             )
         }
     }

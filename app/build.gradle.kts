@@ -50,6 +50,12 @@ dependencies {
     implementation(libs.coil.compose)
     // Mapa (OpenStreetMap): no requiere API key ni cuenta de facturación.
     implementation(libs.osmdroid.android)
+    // Cámara para grabar el partido a la hora de la reserva.
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.video)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

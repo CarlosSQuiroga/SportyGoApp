@@ -18,7 +18,12 @@ data class User(
     val salt: String,
     val rol: UserRole? = null,
     /** Ruta local (file://) de la foto de perfil elegida desde los archivos del teléfono. */
-    val fotoPerfilUri: String? = null
+    val fotoPerfilUri: String? = null,
+    /**
+     * Número de celular Nequi (10 dígitos, empieza por 3). Jugador: desde aquí paga.
+     * Dueño: aquí recibe los pagos; sin número, su cancha no aparece activa. null = sin registrar.
+     */
+    val nequi: String? = null
 )
 
 /**
@@ -38,8 +43,50 @@ data class Cancha(
     /** Formato "H:mm" (24 h). */
     val horaCierre: String = "",
     /** Precio por hora, en pesos. */
-    val precioHora: Int = 0
+    val precioHora: Int = 0,
+    /** Ubicación elegida por el dueño en el mapa (null = canchas antiguas sin ubicación). */
+    val latitud: Double? = null,
+    val longitud: Double? = null,
+    /** Dirección aproximada obtenida del mapa (ej. "Cra. 43A #1-50, Medellín"). Vacío = desconocida. */
+    val direccion: String = "",
+    /** Dónde se reclaman los productos comprados (ej. "Junto a la entrada"). Vacío = sin indicar. */
+    val kiosco: String = ""
 )
+
+enum class CategoriaProducto(val etiqueta: String) {
+    BEBIDA("Bebidas"),
+    SNACK("Snacks")
+}
+
+/**
+ * Producto del kiosco de una cancha. Lo crea el dueño y lo compran los jugadores al reservar.
+ * Se muestra con [imagenUri] (foto de galería o cámara) o, si está vacía, con el ícono [iconoId].
+ */
+data class Producto(
+    val id: String = "",
+    val canchaId: String = "",
+    val nombre: String = "",
+    /** Precio por unidad, en pesos. */
+    val precio: Int = 0,
+    val categoria: CategoriaProducto = CategoriaProducto.BEBIDA,
+    /** Ruta local (file://) de la foto del producto. Vacío = usa el ícono. */
+    val imagenUri: String = "",
+    /** Id de un ícono predefinido de la app (ver IconosProducto). */
+    val iconoId: String = ""
+)
+
+/**
+ * Producto comprado junto con una reserva. Copia nombre y precio del momento de la compra,
+ * así el pedido no cambia si luego el dueño edita o borra el producto.
+ */
+data class ItemCompra(
+    val productoId: String = "",
+    val nombre: String = "",
+    val precioUnitario: Int = 0,
+    val cantidad: Int = 0
+) {
+    val subtotal: Int get() = precioUnitario * cantidad
+}
 
 /**
  * Grabación de un partido. `Grabacion()` es una grabación "vacía" lista para llenar.
@@ -54,7 +101,37 @@ data class Grabacion(
     val fechaGuardado: String = "",
     /** Hora de la reserva en la que se grabó, formato "H:mm". */
     val horaReserva: String = "",
-    val nombreCancha: String = ""
+    val nombreCancha: String = "",
+    /** Reserva en la que se grabó (vacío = grabaciones antiguas sin reserva asociada). */
+    val reservaId: String = ""
+)
+
+/**
+ * Una reserva aparta el horario apenas se crea, pero solo queda confirmada cuando el jugador
+ * acepta el cobro en Nequi. Si lo rechaza, el horario vuelve a quedar libre.
+ */
+enum class EstadoReserva { PENDIENTE_PAGO, CONFIRMADA, RECHAZADA }
+
+enum class TipoNotificacion {
+    CUENTA_CREADA, VINCULAR_NEQUI, PAGO_PENDIENTE, PAGO_RECHAZADO,
+    RESERVA_HECHA, RESERVA_RECIBIDA, PEDIDO_RECIBIDO, GRABAR_PARTIDO
+}
+
+/**
+ * Notificación guardada en la bandeja del usuario [usuarioId] (pantalla "Notificaciones").
+ * [mostrada] indica si ya salió como notificación del sistema en el teléfono: las que llegan
+ * a un usuario sin sesión iniciada se muestran cuando ese usuario entra a la app.
+ */
+data class Notificacion(
+    val id: String = "",
+    val usuarioId: String = "",
+    val tipo: TipoNotificacion = TipoNotificacion.CUENTA_CREADA,
+    val titulo: String = "",
+    val mensaje: String = "",
+    /** Momento de creación (epoch millis). */
+    val creadaEn: Long = 0L,
+    val leida: Boolean = false,
+    val mostrada: Boolean = false
 )
 
 /** Reserva que un jugador hace en una cancha. */
@@ -67,5 +144,18 @@ data class Reserva(
     val fecha: String = "",
     /** Hora de inicio, formato "H:mm". Cada reserva dura 1 hora. */
     val hora: String = "",
-    val precio: Int = 0
-)
+    /** Precio de la cancha (1 hora). */
+    val precio: Int = 0,
+    /** Productos comprados para reclamar en el kiosco de la cancha (vacío = no compró). */
+    val productos: List<ItemCompra> = emptyList(),
+    /** Las reservas antiguas (antes de los pagos) se consideran confirmadas. */
+    val estado: EstadoReserva = EstadoReserva.CONFIRMADA,
+    /** Id de la solicitud de cobro en la pasarela de pagos (vacío = sin cobro). */
+    val pagoId: String = "",
+    /** Nequi del jugador que paga y del dueño que recibe. */
+    val nequiPagador: String = "",
+    val nequiDestino: String = ""
+) {
+    val totalProductos: Int get() = productos.sumOf { it.subtotal }
+    val total: Int get() = precio + totalProductos
+}

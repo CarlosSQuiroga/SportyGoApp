@@ -21,6 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -183,9 +189,17 @@ private fun CustomFormTextField(
     isPassword: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Text
 ) {
+    // Se guarda también el cursor. Si quien llama reformatea el texto (ej. la fecha agrega "/"),
+    // el cursor se lleva al final; si no, el cursor del usuario se respeta.
+    var campo by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    if (campo.text != value) campo = TextFieldValue(value, TextRange(value.length))
+
     OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = campo,
+        onValueChange = {
+            campo = it
+            onValueChange(it.text)
+        },
         placeholder = {
             Text(
                 text = placeholderText,

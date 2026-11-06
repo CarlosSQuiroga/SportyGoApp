@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Address
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
@@ -17,6 +18,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -30,12 +32,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.util.Locale
 import kotlin.coroutines.resume
+
+/** Centro de Colombia: vista inicial cuando aún no se conoce ninguna ubicación. */
+private val CENTRO_COLOMBIA = GeoPoint(4.5709, -74.2973)
+
+/** Color de los marcadores de canchas (verde de la app). */
+private const val COLOR_MARCADOR_CANCHA = 0xFF2DBE5C.toInt()
 
 /** Estado de la ubicación del usuario para el mapa de canchas. */
 @Stable
@@ -94,7 +105,7 @@ fun rememberUbicacionUsuario(): UbicacionUsuarioState {
         val ubicacion = obtenerUbicacion(context)
         if (ubicacion != null) {
             state.punto = GeoPoint(ubicacion.latitude, ubicacion.longitude)
-            state.ciudad = nombreCiudad(context, ubicacion)
+            state.ciudad = nombreCiudad(context, ubicacion.latitude, ubicacion.longitude)
         }
         state.buscando = false
     }
@@ -129,42 +140,60 @@ private suspend fun obtenerUbicacion(context: Context): Location? {
     return proveedores.mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.time }
 }
 
-private suspend fun nombreCiudad(context: Context, loc: Location): String? {
+/** Busca la dirección de unas coordenadas (null si no hay conexión o servicio). */
+private suspend fun buscarDireccion(context: Context, lat: Double, lon: Double): Address? {
     if (!Geocoder.isPresent()) return null
     val geocoder = Geocoder(context, Locale.getDefault())
     return withContext(Dispatchers.IO) {
         try {
-            val direccion = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 suspendCancellableCoroutine { cont ->
-                    geocoder.getFromLocation(loc.latitude, loc.longitude, 1) { lista ->
+                    geocoder.getFromLocation(lat, lon, 1) { lista ->
                         if (cont.isActive) cont.resume(lista.firstOrNull())
                     }
                 }
             } else {
                 @Suppress("DEPRECATION")
-                geocoder.getFromLocation(loc.latitude, loc.longitude, 1)?.firstOrNull()
-            }
-            direccion?.let { d ->
-                listOfNotNull(d.locality ?: d.subAdminArea, d.adminArea)
-                    .distinct()
-                    .joinToString(", ")
-                    .ifEmpty { null }
+                geocoder.getFromLocation(lat, lon, 1)?.firstOrNull()
             }
         } catch (e: Exception) {
-            null // Sin conexión o servicio no disponible: se muestra solo el mapa.
+            null
         }
     }
 }
 
-/**
- * Mapa de OpenStreetMap centrado en [ubicacion] con un marcador "Estás aquí".
- * Si [ubicacion] es null, muestra el mapa de Colombia completo.
- */
+/** Ej. "Medellín, Antioquia". */
+private suspend fun nombreCiudad(context: Context, lat: Double, lon: Double): String? =
+    buscarDireccion(context, lat, lon)?.let { d ->
+        listOfNotNull(d.locality ?: d.subAdminArea, d.adminArea)
+            .distinct()
+            .joinToString(", ")
+            .ifEmpty { null }
+    }
+
+/** Ej. "Carrera 43A #1-50, Medellín". Null si no se pudo obtener. */
+suspend fun direccionDe(context: Context, punto: GeoPoint): String? =
+    buscarDireccion(context, punto.latitude, punto.longitude)?.let { d ->
+        // El número a veces ya trae el "#" (ej. "# 49-45").
+        val numero = d.subThoroughfare?.trim()?.removePrefix("#")?.trim()?.takeIf { it.isNotEmpty() }
+        val calle = when {
+            d.thoroughfare == null -> d.featureName
+            numero == null -> d.thoroughfare
+            else -> "${d.thoroughfare} #$numero"
+        }
+        listOfNotNull(calle, d.locality ?: d.subAdminArea)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(", ")
+            .ifEmpty { null }
+    }
+
+/** Una cancha dibujada en el mapa. */
+data class MarcadorCancha(val id: String, val punto: GeoPoint, val titulo: String)
+
+/** Crea un MapView de OpenStreetMap atado al ciclo de vida de la pantalla. */
 @Composable
-fun MapaCiudad(
-    ubicacion: GeoPoint?,
-    modifier: Modifier = Modifier
-) {
+private fun rememberMapView(): MapView {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -181,11 +210,10 @@ fun MapaCiudad(
                 org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER
             )
             controller.setZoom(5.5)
-            controller.setCenter(GeoPoint(4.5709, -74.2973)) // Colombia
+            controller.setCenter(CENTRO_COLOMBIA)
         }
     }
 
-    // El MapView necesita seguir el ciclo de vida de la pantalla.
     DisposableEffect(lifecycle, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -200,10 +228,59 @@ fun MapaCiudad(
             mapView.onDetach()
         }
     }
+    return mapView
+}
 
-    // Solo se recentra cuando cambia la ubicación (no en cada recomposición).
-    LaunchedEffect(mapView, ubicacion) {
+@Composable
+private fun MapaAndroidView(
+    mapView: MapView,
+    modifier: Modifier,
+    interactivo: Boolean = true,
+    onToque: () -> Unit = {}
+) {
+    val alTocar by rememberUpdatedState(onToque)
+    AndroidView(
+        factory = {
+            mapView.apply {
+                setOnTouchListener { v, _ ->
+                    if (interactivo) {
+                        alTocar()
+                        // Dentro de una pantalla con scroll: el arrastre mueve el mapa, no la página.
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                        false
+                    } else {
+                        true // Mapa de solo lectura: ignora los toques y deja hacer scroll a la página.
+                    }
+                }
+            }
+        },
+        modifier = modifier
+    )
+}
+
+/**
+ * Mapa de OpenStreetMap con un marcador "Estás aquí" en [ubicacion] y un marcador verde
+ * por cada cancha de [canchas]. Al tocar una cancha se llama a [onCanchaClick] con su id.
+ * Si no hay ubicación, se centra en la primera cancha (o en Colombia si no hay ninguna).
+ */
+@Composable
+fun MapaCiudad(
+    ubicacion: GeoPoint?,
+    modifier: Modifier = Modifier,
+    canchas: List<MarcadorCancha> = emptyList(),
+    zoom: Double = 14.0,
+    /** false = mapa fijo de solo lectura (ej. vista previa de la ubicación de la cancha). */
+    interactivo: Boolean = true,
+    onCanchaClick: (String) -> Unit = {}
+) {
+    val mapView = rememberMapView()
+    val alTocarCancha by rememberUpdatedState(onCanchaClick)
+
+    LaunchedEffect(mapView, ubicacion, canchas) {
         mapView.overlays.removeAll { it is Marker }
+
+        // Primero el usuario y luego las canchas, para que las canchas queden encima y
+        // reciban el toque aunque estén en el mismo punto.
         if (ubicacion != null) {
             mapView.overlays.add(
                 Marker(mapView).apply {
@@ -212,22 +289,73 @@ fun MapaCiudad(
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 }
             )
-            mapView.controller.setZoom(14.0)
-            mapView.controller.animateTo(ubicacion)
+        }
+
+        canchas.forEach { c ->
+            mapView.overlays.add(
+                Marker(mapView).apply {
+                    position = c.punto
+                    title = c.titulo
+                    icon = icon?.mutate()?.apply { setTint(COLOR_MARCADOR_CANCHA) }
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setOnMarkerClickListener { _, _ ->
+                        alTocarCancha(c.id)
+                        true
+                    }
+                }
+            )
+        }
+
+        val centro = ubicacion ?: canchas.firstOrNull()?.punto
+        if (centro != null) {
+            mapView.controller.setZoom(zoom)
+            mapView.controller.setCenter(centro)
         }
         mapView.invalidate()
     }
 
-    AndroidView(
-        factory = {
-            mapView.apply {
-                // Dentro de una pantalla con scroll: el arrastre mueve el mapa, no la página.
-                setOnTouchListener { v, _ ->
-                    v.parent?.requestDisallowInterceptTouchEvent(true)
-                    false
-                }
+    MapaAndroidView(mapView, modifier, interactivo)
+}
+
+/**
+ * Mapa para ELEGIR un punto: el usuario arrastra el mapa y el punto elegido es el centro
+ * (la pantalla dibuja un indicador fijo encima). Cada vez que el centro cambia se llama a
+ * [onCentroChange]. Cuando [irA] o [recentrar] cambian (ej. llega la ubicación del usuario o
+ * se toca "mi ubicación"), el mapa se mueve a [irA].
+ */
+@Composable
+fun MapaSeleccion(
+    irA: GeoPoint?,
+    onCentroChange: (GeoPoint) -> Unit,
+    modifier: Modifier = Modifier,
+    recentrar: Int = 0,
+    /** Se llama cuando el usuario toca/arrastra el mapa. */
+    onToque: () -> Unit = {}
+) {
+    val mapView = rememberMapView()
+    val alCambiarCentro by rememberUpdatedState(onCentroChange)
+
+    DisposableEffect(mapView) {
+        val listener = object : MapListener {
+            private fun avisar(): Boolean {
+                val c = mapView.mapCenter
+                alCambiarCentro(GeoPoint(c.latitude, c.longitude))
+                return false
             }
-        },
-        modifier = modifier
-    )
+            override fun onScroll(event: ScrollEvent?) = avisar()
+            override fun onZoom(event: ZoomEvent?) = avisar()
+        }
+        mapView.addMapListener(listener)
+        onDispose { mapView.removeMapListener(listener) }
+    }
+
+    LaunchedEffect(mapView, irA, recentrar) {
+        if (irA != null) {
+            mapView.controller.setZoom(17.0)
+            mapView.controller.setCenter(irA)
+            alCambiarCentro(irA)
+        }
+    }
+
+    MapaAndroidView(mapView, modifier, onToque = onToque)
 }

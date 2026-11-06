@@ -7,6 +7,22 @@
     <!-- Ubicación para centrar el mapa de canchas en la ciudad del usuario -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Notificaciones: cuenta creada, reservas y aviso para grabar el partido -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Aviso a la hora exacta de la reserva -->
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Reprogramar los avisos después de reiniciar el teléfono -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Grabación del partido -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -21,6 +37,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.SportyGoApp"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -29,6 +46,31 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Permite que la app de cámara guarde la foto de un producto en la caché de la app -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.archivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rutas_archivos" />
+        </provider>
+
+        <!-- Llega a la hora de la reserva: avisa al anfitrión que prepare la grabación -->
+        <receiver
+            android:name=".avisos.RecordatorioReceiver"
+            android:exported="false" />
+
+        <!-- Las alarmas se borran al reiniciar el teléfono: las vuelve a programar -->
+        <receiver
+            android:name=".avisos.ArranqueReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

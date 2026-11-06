@@ -25,7 +25,8 @@ class AccountStorage(context: Context) {
             passwordHash = o.getString("passwordHash"),
             salt = o.getString("salt"),
             rol = parseRol(o.optString("rol", "")),
-            fotoPerfilUri = o.optString("fotoPerfilUri", "").ifEmpty { null }
+            fotoPerfilUri = o.optString("fotoPerfilUri", "").ifEmpty { null },
+            nequi = o.optString("nequi", "").ifEmpty { null }
         )
     }
 
@@ -38,6 +39,7 @@ class AccountStorage(context: Context) {
         put("salt", u.salt)
         put("rol", u.rol?.name ?: "")
         put("fotoPerfilUri", u.fotoPerfilUri ?: "")
+        put("nequi", u.nequi ?: "")
     }
 
     // ---------- Sesión ----------
@@ -64,7 +66,11 @@ class AccountStorage(context: Context) {
             capacidad = o.getInt("capacidad"),
             horaApertura = o.getString("horaApertura"),
             horaCierre = o.getString("horaCierre"),
-            precioHora = o.getInt("precioHora")
+            precioHora = o.getInt("precioHora"),
+            latitud = if (o.has("latitud")) o.getDouble("latitud") else null,
+            longitud = if (o.has("longitud")) o.getDouble("longitud") else null,
+            direccion = o.optString("direccion", ""),
+            kiosco = o.optString("kiosco", "")
         )
     }
 
@@ -78,11 +84,41 @@ class AccountStorage(context: Context) {
         put("horaApertura", c.horaApertura)
         put("horaCierre", c.horaCierre)
         put("precioHora", c.precioHora)
+        c.latitud?.let { put("latitud", it) }
+        c.longitud?.let { put("longitud", it) }
+        put("direccion", c.direccion)
+        put("kiosco", c.kiosco)
+    }
+
+    // ---------- Productos del kiosco ----------
+
+    fun loadProductos(): List<Producto> = loadList(KEY_PRODUCTOS) { o ->
+        Producto(
+            id = o.getString("id"),
+            canchaId = o.getString("canchaId"),
+            nombre = o.getString("nombre"),
+            precio = o.getInt("precio"),
+            categoria = CategoriaProducto.entries.firstOrNull { it.name == o.optString("categoria") }
+                ?: CategoriaProducto.BEBIDA,
+            imagenUri = o.optString("imagenUri", ""),
+            iconoId = o.optString("iconoId", "")
+        )
+    }
+
+    fun saveProductos(productos: List<Producto>) = saveList(KEY_PRODUCTOS, productos) { p ->
+        put("id", p.id)
+        put("canchaId", p.canchaId)
+        put("nombre", p.nombre)
+        put("precio", p.precio)
+        put("categoria", p.categoria.name)
+        put("imagenUri", p.imagenUri)
+        put("iconoId", p.iconoId)
     }
 
     // ---------- Reservas ----------
 
     fun loadReservas(): List<Reserva> = loadList(KEY_RESERVAS) { o ->
+        val items = o.optJSONArray("productos") ?: JSONArray()
         Reserva(
             id = o.getString("id"),
             usuarioId = o.getString("usuarioId"),
@@ -90,7 +126,21 @@ class AccountStorage(context: Context) {
             nombreCancha = o.getString("nombreCancha"),
             fecha = o.getString("fecha"),
             hora = o.getString("hora"),
-            precio = o.getInt("precio")
+            precio = o.getInt("precio"),
+            productos = (0 until items.length()).map { i ->
+                val it = items.getJSONObject(i)
+                ItemCompra(
+                    productoId = it.getString("productoId"),
+                    nombre = it.getString("nombre"),
+                    precioUnitario = it.getInt("precioUnitario"),
+                    cantidad = it.getInt("cantidad")
+                )
+            },
+            estado = EstadoReserva.entries.firstOrNull { it.name == o.optString("estado") }
+                ?: EstadoReserva.CONFIRMADA,
+            pagoId = o.optString("pagoId", ""),
+            nequiPagador = o.optString("nequiPagador", ""),
+            nequiDestino = o.optString("nequiDestino", "")
         )
     }
 
@@ -102,6 +152,20 @@ class AccountStorage(context: Context) {
         put("fecha", r.fecha)
         put("hora", r.hora)
         put("precio", r.precio)
+        put("productos", JSONArray().apply {
+            r.productos.forEach { item ->
+                put(JSONObject().apply {
+                    put("productoId", item.productoId)
+                    put("nombre", item.nombre)
+                    put("precioUnitario", item.precioUnitario)
+                    put("cantidad", item.cantidad)
+                })
+            }
+        })
+        put("estado", r.estado.name)
+        put("pagoId", r.pagoId)
+        put("nequiPagador", r.nequiPagador)
+        put("nequiDestino", r.nequiDestino)
     }
 
     // ---------- Grabaciones ----------
@@ -113,7 +177,8 @@ class AccountStorage(context: Context) {
             videoUri = o.getString("videoUri"),
             fechaGuardado = o.getString("fechaGuardado"),
             horaReserva = o.getString("horaReserva"),
-            nombreCancha = o.getString("nombreCancha")
+            nombreCancha = o.getString("nombreCancha"),
+            reservaId = o.optString("reservaId", "")
         )
     }
 
@@ -125,7 +190,45 @@ class AccountStorage(context: Context) {
             put("fechaGuardado", g.fechaGuardado)
             put("horaReserva", g.horaReserva)
             put("nombreCancha", g.nombreCancha)
+            put("reservaId", g.reservaId)
         }
+
+    // ---------- Notificaciones ----------
+
+    fun loadNotificaciones(): List<Notificacion> = loadList(KEY_NOTIFICACIONES) { o ->
+        Notificacion(
+            id = o.getString("id"),
+            usuarioId = o.getString("usuarioId"),
+            tipo = TipoNotificacion.entries.firstOrNull { it.name == o.optString("tipo") }
+                ?: TipoNotificacion.CUENTA_CREADA,
+            titulo = o.getString("titulo"),
+            mensaje = o.getString("mensaje"),
+            creadaEn = o.getLong("creadaEn"),
+            leida = o.optBoolean("leida", false),
+            mostrada = o.optBoolean("mostrada", false)
+        )
+    }
+
+    fun saveNotificaciones(notificaciones: List<Notificacion>) =
+        saveList(KEY_NOTIFICACIONES, notificaciones) { n ->
+            put("id", n.id)
+            put("usuarioId", n.usuarioId)
+            put("tipo", n.tipo.name)
+            put("titulo", n.titulo)
+            put("mensaje", n.mensaje)
+            put("creadaEn", n.creadaEn)
+            put("leida", n.leida)
+            put("mostrada", n.mostrada)
+        }
+
+    // ---------- Grabaciones que el anfitrión decidió no hacer ----------
+
+    fun loadReservasSinGrabar(): Set<String> =
+        prefs.getStringSet(KEY_SIN_GRABAR, emptySet()).orEmpty().toSet()
+
+    fun saveReservasSinGrabar(ids: Set<String>) {
+        prefs.edit().putStringSet(KEY_SIN_GRABAR, ids).apply()
+    }
 
     // ---------- Helpers JSON ----------
 
@@ -155,5 +258,8 @@ class AccountStorage(context: Context) {
         const val KEY_CANCHAS = "canchas"
         const val KEY_RESERVAS = "reservas"
         const val KEY_GRABACIONES = "grabaciones"
+        const val KEY_NOTIFICACIONES = "notificaciones"
+        const val KEY_PRODUCTOS = "productos"
+        const val KEY_SIN_GRABAR = "reservas_sin_grabar"
     }
 }

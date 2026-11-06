@@ -22,8 +22,11 @@ import me.juliangarcia.sportygoapp.ui.screens.AddFieldScreen
 import me.juliangarcia.sportygoapp.ui.screens.DetallesCanchaScreen
 import me.juliangarcia.sportygoapp.ui.screens.LoginScreen
 import me.juliangarcia.sportygoapp.ui.screens.ProfileScreen
+import me.juliangarcia.sportygoapp.ui.screens.RegisterFieldScreen
 import me.juliangarcia.sportygoapp.ui.screens.SearchFieldsScreen
 import me.juliangarcia.sportygoapp.ui.screens.SelectAccountScreen
+import kotlinx.coroutines.delay
+import org.osmdroid.util.GeoPoint
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -77,10 +80,104 @@ fun InicioSesionRoute(auth: AuthState) {
     )
 }
 
+/** Ubicación de la cancha elegida por el dueño en el mapa. */
+data class UbicacionCancha(val latitud: Double, val longitud: Double, val direccion: String)
+
+/** Pantalla "Registra tu cancha" (dueño): elegir en el mapa dónde está la cancha. */
+@Composable
+fun RegistrarUbicacionRoute(
+    inicial: UbicacionCancha?,
+    onUbicacionRegistrada: (UbicacionCancha) -> Unit
+) {
+    val context = LocalContext.current
+    val ubicacionUsuario = rememberUbicacionUsuario()
+
+    // Si ya había elegido una ubicación (vuelve con "Cambiar"), el mapa arranca ahí.
+    val puntoInicial = remember { inicial?.let { GeoPoint(it.latitud, it.longitud) } }
+    var centro by remember { mutableStateOf(puntoInicial) }
+    var direccion by remember { mutableStateOf(inicial?.direccion) }
+    var buscandoDireccion by remember { mutableStateOf(false) }
+    var recentrar by remember { mutableStateOf(0) }
+    // A dónde mover el mapa. Al llegar la ubicación del usuario solo se usa si aún no ha
+    // tocado el mapa, para no deshacer el punto que ya eligió.
+    var destino by remember { mutableStateOf(puntoInicial) }
+    var tocado by remember { mutableStateOf(puntoInicial != null) }
+    LaunchedEffect(ubicacionUsuario.punto) {
+        val punto = ubicacionUsuario.punto
+        if (punto != null && !tocado) destino = punto
+    }
+
+    // Busca la dirección cuando el mapa deja de moverse un momento.
+    LaunchedEffect(centro) {
+        val punto = centro ?: return@LaunchedEffect
+        buscandoDireccion = true
+        delay(600)
+        direccion = direccionDe(context, punto)
+        buscandoDireccion = false
+    }
+
+    val texto = when {
+        centro == null && ubicacionUsuario.buscando -> "Buscando tu ubicación..."
+        centro == null -> "Mueve el mapa hasta tu cancha"
+        buscandoDireccion -> "Buscando dirección..."
+        direccion != null -> direccion!!
+        else -> "Ubicación seleccionada"
+    }
+
+    RegisterFieldScreen(
+        direccionTexto = texto,
+        puedeConfirmar = centro != null,
+        mapa = { m ->
+            MapaSeleccion(
+                irA = destino,
+                recentrar = recentrar,
+                onCentroChange = { centro = it },
+                onToque = { tocado = true },
+                modifier = m
+            )
+        },
+        onMiUbicacionClick = {
+            val punto = ubicacionUsuario.punto
+            if (punto != null) {
+                destino = punto
+                recentrar++
+            } else {
+                // Aún no hay ubicación: al llegar, el mapa se moverá ahí.
+                tocado = false
+                ubicacionUsuario.solicitar()
+            }
+        },
+        onRegistrarUbicacionClick = {
+            val punto = centro ?: return@RegisterFieldScreen
+            onUbicacionRegistrada(
+                UbicacionCancha(
+                    latitud = punto.latitude,
+                    longitud = punto.longitude,
+                    direccion = if (buscandoDireccion) "" else direccion.orEmpty()
+                )
+            )
+        }
+    )
+}
+
 /** Pantalla "Datos de la cancha" (dueño). */
 @Composable
-fun AddFieldRoute(auth: AuthState, onCanchaRegistrada: () -> Unit) {
+fun AddFieldRoute(
+    auth: AuthState,
+    ubicacion: UbicacionCancha,
+    onCambiarUbicacionClick: () -> Unit,
+    onCanchaRegistrada: () -> Unit
+) {
     val context = LocalContext.current
+    val marcador = remember(ubicacion) {
+        listOf(
+            MarcadorCancha(
+                id = "mi-cancha",
+                punto = GeoPoint(ubicacion.latitud, ubicacion.longitud),
+                titulo = "Tu cancha"
+            )
+        )
+    }
 
     var nombre by rememberSaveable { mutableStateOf("") }
     var descripcion by rememberSaveable { mutableStateOf("") }
@@ -142,17 +239,26 @@ fun AddFieldRoute(auth: AuthState, onCanchaRegistrada: () -> Unit) {
         },
         onHoraAperturaClick = { elegirHora(apertura) { apertura = it } },
         onHoraCierreClick = { elegirHora(cierre) { cierre = it } },
-        onEscanearQrClick = {
-            Toast.makeText(context, "Escanear QR estará disponible pronto.", Toast.LENGTH_SHORT)
-                .show()
-        },
+        direccion = ubicacion.direccion,
+        mapa = { m -> MapaCiudad(
+                ubicacion = null,
+                canchas = marcador,
+                zoom = 16.0,
+                interactivo = false,
+                modifier = m
+            ) },
+        onCambiarUbicacionClick = onCambiarUbicacionClick,
         onPrecioHoraChange = { valor ->
             precio = valor.filter { c -> c.isDigit() }.take(9)
             error = null
         },
         onRegistrarCanchaClick = {
             error = auth.registrarCancha(
-                nombre, descripcion, capacidad, apertura, cierre, precio, imagenUri = imagen
+                nombre, descripcion, capacidad, apertura, cierre, precio,
+                imagenUri = imagen,
+                latitud = ubicacion.latitud,
+                longitud = ubicacion.longitud,
+                direccion = ubicacion.direccion
             )
             if (error == null) onCanchaRegistrada()
         }
@@ -180,8 +286,17 @@ fun BuscarCanchasRoute(
         } else {
             todas.filter {
                 it.nombre.contains(q, ignoreCase = true) ||
-                    it.descripcion.contains(q, ignoreCase = true)
+                    it.descripcion.contains(q, ignoreCase = true) ||
+                    it.direccion.contains(q, ignoreCase = true)
             }
+        }
+    }
+    // Canchas con ubicación, dibujadas en el mapa (respetan la búsqueda).
+    val marcadores = remember(canchas) {
+        canchas.mapNotNull { c ->
+            val lat = c.latitud ?: return@mapNotNull null
+            val lon = c.longitud ?: return@mapNotNull null
+            MarcadorCancha(c.id, GeoPoint(lat, lon), c.nombre)
         }
     }
 
@@ -198,7 +313,14 @@ fun BuscarCanchasRoute(
         busquedaTexto = busqueda,
         deporteSeleccionado = deporte,
         canchas = canchas,
-        mapa = { m -> MapaCiudad(ubicacion = ubicacion.punto, modifier = m) },
+        mapa = { m ->
+            MapaCiudad(
+                ubicacion = ubicacion.punto,
+                canchas = marcadores,
+                onCanchaClick = { id -> todas.firstOrNull { it.id == id }?.let(onCanchaClick) },
+                modifier = m
+            )
+        },
         onNotificacionesClick = onNotificacionesClick,
         onUbicacionClick = { ubicacion.solicitar() },
         onMapTargetClick = { ubicacion.solicitar() },
@@ -245,6 +367,10 @@ fun DetallesCanchaRoute(
     val horas = remember(cancha, fecha) { horasDeReserva(cancha, fecha) }
     val ocupadas = remember(cancha.id, fecha, refrescar) { auth.horasOcupadas(cancha.id, fecha) }
 
+    // Productos del kiosco y cantidades elegidas (carrito).
+    val productos = remember(cancha.id) { auth.productosDeCancha(cancha.id) }
+    var carrito by rememberSaveable { mutableStateOf(mapOf<String, Int>()) }
+
     DetallesCanchaScreen(
         cancha = cancha,
         dias = etiquetas,
@@ -263,8 +389,13 @@ fun DetallesCanchaRoute(
             hora = it
             error = null
         },
+        productos = productos,
+        cantidades = carrito,
+        onCantidadChange = { id, cantidad ->
+            carrito = if (cantidad <= 0) carrito - id else carrito + (id to cantidad)
+        },
         onReservarClick = {
-            error = auth.reservar(cancha.id, fecha, hora)
+            error = auth.reservar(cancha.id, fecha, hora, carrito)
             refrescar++
             if (error == null) onReservaCreada()
         }
@@ -302,6 +433,7 @@ fun PerfilRoute(
     onMisReservasClick: () -> Unit,
     onMisGrabacionesClick: () -> Unit,
     onMisEquiposClick: () -> Unit,
+    onMetodosPagoClick: () -> Unit,
     onBottomNavTabClick: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -335,6 +467,7 @@ fun PerfilRoute(
         onMisReservasClick = onMisReservasClick,
         onMisGrabacionesClick = onMisGrabacionesClick,
         onMisEquiposClick = onMisEquiposClick,
+        onMetodosPagoClick = onMetodosPagoClick,
         // Al cerrar sesión, la navegación detecta que ya no hay usuario y vuelve a la bienvenida.
         onCerrarSesionClick = { auth.cerrarSesion() },
         onBottomNavTabClick = onBottomNavTabClick

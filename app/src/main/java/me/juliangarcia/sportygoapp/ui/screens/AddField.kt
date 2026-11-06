@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
-import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -61,7 +61,10 @@ fun AddFieldScreen(
     horaApertura: String = "0:00",
     horaCierre: String = "1:00",
     precioHora: String = "",
-    mapaImagenUrl: String = "https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=800&auto=format&fit=crop",
+    // Dirección de la ubicación marcada en el mapa ("" = desconocida)
+    direccion: String = "",
+    // Mapa con la ubicación de la cancha (MapaCiudad); en el Preview es solo un fondo
+    mapa: @Composable (Modifier) -> Unit = { m -> Box(m.background(DarkCardBackground)) },
     // Mensaje de validación (null = sin error)
     errorMensaje: String? = null,
     // Callbacks para manejar eventos e ingresar datos en la navegación futura
@@ -71,7 +74,7 @@ fun AddFieldScreen(
     onCapacidadChange: (String) -> Unit = {},
     onHoraAperturaClick: () -> Unit = {},
     onHoraCierreClick: () -> Unit = {},
-    onEscanearQrClick: () -> Unit = {},
+    onCambiarUbicacionClick: () -> Unit = {},
     onPrecioHoraChange: (String) -> Unit = {},
     onRegistrarCanchaClick: () -> Unit = {}
 ) {
@@ -271,33 +274,6 @@ fun AddFieldScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Campo: Escanear QR de la Cámara
-            Text(
-                text = "Escanear QR de la Cámara:",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = TextWhite
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkCardBackground)
-                    .clickable { onEscanearQrClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.PhotoCamera,
-                    contentDescription = "Escanear QR de la Cámara",
-                    tint = PrimaryGreen,
-                    modifier = Modifier.size(64.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             // Campo: Ajusta el Precio/Hora
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -322,16 +298,49 @@ fun AddFieldScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Sección de Mapa de Ubicación con Coil
-            AsyncImage(
-                model = mapaImagenUrl,
-                contentDescription = "Mapa de Ubicación de la Cancha",
-                modifier = Modifier
+            // Ubicación marcada en el paso anterior
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Ubicación de la cancha:",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextWhite
+                )
+                Text(
+                    text = "Cambiar",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PrimaryGreen,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onCambiarUbicacionClick() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            mapa(
+                Modifier
                     .fillMaxWidth()
                     .height(180.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                contentScale = ContentScale.Crop
+                    .clip(RoundedCornerShape(16.dp))
             )
+            if (direccion.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.LocationOn,
+                        contentDescription = null,
+                        tint = PrimaryGreen,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = direccion, fontSize = 14.sp, color = TextSecondary)
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 

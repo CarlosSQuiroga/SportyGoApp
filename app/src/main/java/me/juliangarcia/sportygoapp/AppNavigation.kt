@@ -7,11 +7,35 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.ErrorOutline
+import me.juliangarcia.sportygoapp.data.EstadoReserva
+import me.juliangarcia.sportygoapp.pagos.NequiSimulado
+import me.juliangarcia.sportygoapp.ui.screens.MetodoPagoScreen
+import me.juliangarcia.sportygoapp.ui.screens.NequiPruebaScreen
+import me.juliangarcia.sportygoapp.ui.ProductoFormRoute
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import me.juliangarcia.sportygoapp.data.Notificacion
+import me.juliangarcia.sportygoapp.data.TipoNotificacion
+import me.juliangarcia.sportygoapp.ui.screens.GrabarPartidoScreen
+import me.juliangarcia.sportygoapp.ui.screens.NotificacionItem
+import me.juliangarcia.sportygoapp.ui.screens.ReproducirGrabacionScreen
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import me.juliangarcia.sportygoapp.data.Reserva
@@ -27,7 +51,9 @@ import me.juliangarcia.sportygoapp.data.AuthState
 import me.juliangarcia.sportygoapp.data.UserRole
 import me.juliangarcia.sportygoapp.ui.AddFieldRoute
 import me.juliangarcia.sportygoapp.ui.InicioSesionRoute
+import me.juliangarcia.sportygoapp.ui.RegistrarUbicacionRoute
 import me.juliangarcia.sportygoapp.ui.RegistroRoute
+import me.juliangarcia.sportygoapp.ui.UbicacionCancha
 import me.juliangarcia.sportygoapp.ui.screens.AddProductScreen
 import me.juliangarcia.sportygoapp.ui.screens.CreateProductScreen
 import me.juliangarcia.sportygoapp.ui.screens.InventaryOwnerScreen
@@ -39,7 +65,6 @@ import me.juliangarcia.sportygoapp.ui.screens.NotificationsScreen
 import me.juliangarcia.sportygoapp.ui.screens.OpenScreen
 import me.juliangarcia.sportygoapp.ui.screens.OwnersPanelScreen
 import me.juliangarcia.sportygoapp.ui.screens.RecordVideoScreen
-import me.juliangarcia.sportygoapp.ui.screens.RegisterFieldScreen
 import me.juliangarcia.sportygoapp.ui.screens.SelectProfileScreen
 import me.juliangarcia.sportygoapp.ui.screens.ShopScreen
 import me.juliangarcia.sportygoapp.ui.screens.TeamsScreen
@@ -62,12 +87,45 @@ private enum class Acceso {
 }
 
 @Composable
-fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
+fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = Modifier) {
     val navController = rememberNavController()
     val startDestination = remember { auth.rutaInicial() }
 
-    // El dueño debe registrar la ubicación antes de poder llenar los datos de la cancha.
-    var ubicacionRegistrada by rememberSaveable { mutableStateOf(false) }
+    // El dueño debe marcar la ubicación en el mapa antes de llenar los datos de la cancha.
+    var ubicacionLat by rememberSaveable { mutableStateOf<Double?>(null) }
+    var ubicacionLon by rememberSaveable { mutableStateOf<Double?>(null) }
+    var ubicacionDireccion by rememberSaveable { mutableStateOf("") }
+    val ubicacionCancha = ubicacionLat?.let { lat ->
+        ubicacionLon?.let { lon -> UbicacionCancha(lat, lon, ubicacionDireccion) }
+    }
+
+    // ---------------------------------------------------------------
+    // Grabación automática: si al entrar a la app el anfitrión tiene una reserva en curso
+    // (sin grabar), se abre directamente la cámara.
+    // ---------------------------------------------------------------
+    val entradaActual by navController.currentBackStackEntryAsState()
+    val rutaActual = entradaActual?.destination?.route
+    var revisarGrabacion by remember { mutableStateOf(true) }
+
+    // Cada vez que se entra (o se vuelve) a la app: recargar datos (pudo llegar un aviso).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        auth.refrescar()
+        revisarGrabacion = true
+    }
+    // También justo después de iniciar sesión.
+    LaunchedEffect(auth.usuario?.id) {
+        if (auth.usuario != null) revisarGrabacion = true
+    }
+    LaunchedEffect(revisarGrabacion, rutaActual) {
+        // Espera a estar en una pantalla con sesión (no en login ni elegir perfil).
+        if (!revisarGrabacion || rutaActual == null || rutaActual in RUTAS_SIN_GRABACION_AUTOMATICA) {
+            return@LaunchedEffect
+        }
+        revisarGrabacion = false
+        val reserva = auth.reservaParaGrabar() ?: return@LaunchedEffect
+        if (rutaActual == Routes.GRABAR_PARTIDO_PATRON) return@LaunchedEffect
+        navController.navigate(Routes.grabarPartido(reserva.id)) { launchSingleTop = true }
+    }
 
     NavHost(
         navController = navController,
@@ -121,10 +179,16 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
         // ---------------------------------------------------------------
         composable(route = Routes.REGISTER_FIELD) {
             RutaProtegida(Acceso.DUENIO, auth, navController) {
-                RegisterFieldScreen(
-                    onRegistrarUbicacionClick = {
-                        ubicacionRegistrada = true
-                        navController.irA(Routes.ADD_FIELD)
+                RegistrarUbicacionRoute(
+                    inicial = ubicacionCancha,
+                    onUbicacionRegistrada = { u ->
+                        ubicacionLat = u.latitud
+                        ubicacionLon = u.longitud
+                        ubicacionDireccion = u.direccion
+                        // Si venía de "Cambiar", vuelve a los datos (que siguen en el historial).
+                        if (!navController.popBackStack(Routes.ADD_FIELD, inclusive = false)) {
+                            navController.irA(Routes.ADD_FIELD)
+                        }
                     }
                 )
             }
@@ -132,11 +196,15 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
 
         composable(route = Routes.ADD_FIELD) {
             RutaProtegida(Acceso.DUENIO, auth, navController) {
-                if (ubicacionRegistrada) {
+                if (ubicacionCancha != null) {
                     AddFieldRoute(
                         auth = auth,
+                        ubicacion = ubicacionCancha,
+                        onCambiarUbicacionClick = { navController.irA(Routes.REGISTER_FIELD) },
                         onCanchaRegistrada = {
-                            ubicacionRegistrada = false
+                            ubicacionLat = null
+                            ubicacionLon = null
+                            ubicacionDireccion = ""
                             navController.irAInicio(auth) // -> OWNERS_PANEL
                         }
                     )
@@ -156,6 +224,10 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
                 var filtroIngresos by rememberSaveable { mutableStateOf("Semana") }
                 val resumen = resumenDuenio(auth.reservasDeMiCancha)
                 OwnersPanelScreen(
+                    canchaActiva = auth.usuario?.nequi != null,
+                    onRegistrarNequiClick = { navController.irA(Routes.METODO_PAGO) },
+                    hayNotificacionesSinLeer = auth.misNotificaciones.any { !it.leida },
+                    onNotificacionesClick = { navController.irA(Routes.NOTIFICATIONS) },
                     nombreCancha = auth.cancha?.nombre ?: "",
                     reservasHoy = resumen.reservasHoy,
                     ingresosMonto = formatearPrecio(resumen.ingresosSemana),
@@ -173,26 +245,35 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
 
         composable(route = Routes.INVENTARY_OWNER) {
             RutaProtegida(Acceso.DUENIO_CON_CANCHA, auth, navController) {
-                var categoria by rememberSaveable { mutableStateOf("Bebidas") }
+                var categoria by rememberSaveable { mutableStateOf("Todos") }
                 InventaryOwnerScreen(
+                    productos = auth.misProductos,
+                    ubicacionKiosco = auth.cancha?.kiosco.orEmpty(),
                     categoriaSeleccionada = categoria,
                     tabBottomActual = "Inicio",
                     onBackClick = { navController.popBackStack() },
                     onCategoriaTabClick = { categoria = it },
                     onAgregarProductoClick = { navController.irA(Routes.CREATE_PRODUCT) },
+                    onProductoClick = { p -> navController.irA(Routes.editarProducto(p.id)) },
+                    onGuardarKiosco = { auth.actualizarKiosco(it) },
                     onBottomNavTabClick = { tab -> navController.irATab(tab, auth) }
                 )
             }
         }
 
-        composable(route = Routes.CREATE_PRODUCT) {
+        composable(
+            route = Routes.CREATE_PRODUCT_PATRON,
+            arguments = listOf(navArgument(Routes.ARG_PRODUCTO_ID) {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            })
+        ) { entry ->
             RutaProtegida(Acceso.DUENIO_CON_CANCHA, auth, navController) {
-                var iconoId by rememberSaveable { mutableStateOf("1") }
-                CreateProductScreen(
-                    iconoSeleccionadoId = iconoId,
-                    onBackClick = { navController.popBackStack() },
-                    onIconoSelected = { iconoId = it.id },
-                    onGuardarIconoClick = { navController.popBackStack() }
+                ProductoFormRoute(
+                    auth = auth,
+                    productoId = entry.arguments?.getString(Routes.ARG_PRODUCTO_ID),
+                    onTerminado = { navController.popBackStack() }
                 )
             }
         }
@@ -235,8 +316,15 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
 
         composable(route = Routes.MY_RESERVE) {
             RutaProtegida(Acceso.JUGADOR, auth, navController) {
+                val kioscos = remember(auth.misReservas) {
+                    auth.misReservas.map { it.canchaId }.distinct().associateWith { id ->
+                        auth.canchaPorId(id)?.kiosco.orEmpty()
+                    }
+                }
                 MyReserveScreen(
-                    reservas = auth.misReservas,
+                    reservas = auth.misReservas.sortedByDescending { it.estado == EstadoReserva.PENDIENTE_PAGO },
+                    kioscos = kioscos,
+                    onPagarClick = { navController.irA(Routes.NEQUI_PRUEBA) },
                     onBackClick = { navController.popBackStack() },
                     onBuscarCanchasClick = { navController.irAInicio(auth) }
                 )
@@ -300,10 +388,32 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
         composable(route = Routes.NOTIFICATIONS) {
             RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
                 var tabActual by rememberSaveable { mutableStateOf("Todas") }
+                val visibles = auth.misNotificaciones
+                    .filter { tabActual == "Todas" || !it.leida }
                 NotificationsScreen(
                     tabSeleccionada = tabActual,
+                    notificaciones = visibles.map { it.aItem() },
                     onBackClick = { navController.popBackStack() },
-                    onTabSelected = { tabActual = it }
+                    onTabSelected = { tabActual = it },
+                    onNotificacionClick = { item ->
+                        auth.marcarNotificacionLeida(item.id)
+                        val tipo = visibles.firstOrNull { it.id == item.id }?.tipo
+                        when (tipo) {
+                            TipoNotificacion.VINCULAR_NEQUI ->
+                                navController.irA(Routes.METODO_PAGO)
+                            TipoNotificacion.PAGO_PENDIENTE ->
+                                navController.irA(Routes.NEQUI_PRUEBA)
+                            TipoNotificacion.GRABAR_PARTIDO ->
+                                auth.reservaParaGrabar()?.let {
+                                    navController.irA(Routes.grabarPartido(it.id))
+                                }
+                            TipoNotificacion.RESERVA_HECHA ->
+                                if (auth.usuario?.rol == UserRole.JUGADOR) {
+                                    navController.irA(Routes.MY_RESERVE)
+                                }
+                            else -> Unit
+                        }
+                    }
                 )
             }
         }
@@ -327,8 +437,119 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
                     grabaciones = auth.misGrabaciones,
                     onBackClick = { navController.popBackStack() },
                     onTabSelected = { tabActual = it },
-                    onGrabacionClick = { navController.irA(Routes.MATCH_VIDEO) },
+                    onGrabacionClick = { g -> navController.irA(Routes.reproducir(g.id)) },
                     onBottomNavTabClick = { tab -> navController.irATab(tab, auth) }
+                )
+            }
+        }
+
+        // Cámara para grabar el partido (el anfitrión es el jugador que reservó).
+        composable(
+            route = Routes.GRABAR_PARTIDO_PATRON,
+            arguments = listOf(navArgument(Routes.ARG_RESERVA_ID) { type = NavType.StringType })
+        ) { entry ->
+            RutaProtegida(Acceso.JUGADOR, auth, navController) {
+                val reservaId = entry.arguments?.getString(Routes.ARG_RESERVA_ID).orEmpty()
+                val reserva = remember(reservaId) { auth.reservaPorId(reservaId) }
+                if (reserva == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                } else {
+                    GrabarPartidoScreen(
+                        reserva = reserva,
+                        onVideoGuardado = { uri -> auth.guardarGrabacion(reserva, uri) },
+                        onTerminado = {
+                            navController.navigate(Routes.RECORD_VIDEO) {
+                                popUpTo(Routes.GRABAR_PARTIDO_PATRON) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        },
+                        onAhoraNo = {
+                            auth.omitirGrabacion(reserva.id)
+                            navController.popBackStack()
+                        },
+                        onSalir = { navController.popBackStack() }
+                    )
+                }
+            }
+        }
+
+        composable(
+            route = Routes.REPRODUCIR_PATRON,
+            arguments = listOf(navArgument(Routes.ARG_GRABACION_ID) { type = NavType.StringType })
+        ) { entry ->
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                val id = entry.arguments?.getString(Routes.ARG_GRABACION_ID).orEmpty()
+                val grabacion = remember(id) { auth.grabacionPorId(id) }
+                if (grabacion == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                } else {
+                    ReproducirGrabacionScreen(
+                        grabacion = grabacion,
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
+            }
+        }
+
+        // Registrar el número Nequi (jugador: para pagar; dueño: para recibir pagos).
+        composable(route = Routes.METODO_PAGO) {
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                val registrado = auth.usuario?.nequi
+                var numero by rememberSaveable { mutableStateOf(registrado.orEmpty()) }
+                var error by rememberSaveable { mutableStateOf<String?>(null) }
+                var exito by rememberSaveable { mutableStateOf<String?>(null) }
+                MetodoPagoScreen(
+                    esDuenio = auth.usuario?.rol == UserRole.DUENIO,
+                    nequiRegistrado = registrado,
+                    numero = numero,
+                    errorMensaje = error,
+                    mensajeExito = exito,
+                    onBackClick = { navController.popBackStack() },
+                    onNumeroChange = {
+                        numero = it.filter { c -> c.isDigit() }.take(10)
+                        error = null
+                        exito = null
+                    },
+                    onGuardarClick = {
+                        if (numero.isBlank()) {
+                            error = "Escribe tu número Nequi."
+                        } else {
+                            error = auth.actualizarNequi(numero)
+                            exito = if (error == null) "Número Nequi guardado." else null
+                        }
+                    },
+                    onQuitarClick = {
+                        auth.actualizarNequi("")
+                        numero = ""
+                        error = null
+                        exito = "Número quitado."
+                    },
+                    onVerSolicitudesClick = { navController.irA(Routes.NEQUI_PRUEBA) }
+                )
+            }
+        }
+
+        // Nequi de prueba: aceptar o rechazar los cobros enviados al número del jugador.
+        composable(route = Routes.NEQUI_PRUEBA) {
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                val numero = auth.usuario?.nequi
+                var version by remember { mutableStateOf(0) }
+                val solicitudes = remember(numero, version) {
+                    numero?.let { nequi.solicitudesDe(it) } ?: emptyList()
+                }
+                fun responder(pagoId: String, aceptar: Boolean) {
+                    nequi.responder(pagoId, aceptar)
+                    // Igual que al volver de la app de Nequi: la reserva se confirma o se libera.
+                    auth.sincronizarPagos()
+                    version++
+                }
+                NequiPruebaScreen(
+                    numero = numero,
+                    solicitudes = solicitudes,
+                    onBackClick = { navController.popBackStack() },
+                    onRegistrarNequiClick = { navController.irA(Routes.METODO_PAGO) },
+                    onAceptar = { responder(it.id, true) },
+                    onRechazar = { responder(it.id, false) }
                 )
             }
         }
@@ -341,10 +562,57 @@ fun SportyGoNavHost(auth: AuthState, modifier: Modifier = Modifier) {
                     onMisReservasClick = { navController.irA(Routes.MY_RESERVE) },
                     onMisGrabacionesClick = { navController.irA(Routes.RECORD_VIDEO) },
                     onMisEquiposClick = { navController.irA(Routes.TEAMS) },
+                    onMetodosPagoClick = { navController.irA(Routes.METODO_PAGO) },
                     onBottomNavTabClick = { tab -> navController.irATab(tab, auth) }
                 )
             }
         }
+    }
+}
+
+/** Pantallas sobre las que NO se abre la cámara automáticamente. */
+private val RUTAS_SIN_GRABACION_AUTOMATICA = setOf(
+    Routes.OPEN_SCREEN,
+    Routes.LOGIN,
+    Routes.SELECT_ACCOUNT,
+    Routes.SELECT_PROFILE
+)
+
+// =====================================================================
+// Notificaciones: modelo guardado -> fila de la pantalla
+// =====================================================================
+
+private fun Notificacion.aItem(): NotificacionItem {
+    val (icono, color) = when (tipo) {
+        TipoNotificacion.CUENTA_CREADA -> Icons.Outlined.CheckCircle to Color(0xFF64F089)
+        TipoNotificacion.VINCULAR_NEQUI -> Icons.Outlined.AccountBalanceWallet to Color(0xFFA78BFA)
+        TipoNotificacion.PAGO_PENDIENTE -> Icons.Outlined.AccountBalanceWallet to Color(0xFFE5B83B)
+        TipoNotificacion.PAGO_RECHAZADO -> Icons.Outlined.ErrorOutline to Color(0xFFFF6B6B)
+        TipoNotificacion.RESERVA_HECHA -> Icons.Outlined.CalendarToday to Color(0xFF63A0E8)
+        TipoNotificacion.RESERVA_RECIBIDA -> Icons.Outlined.CalendarToday to Color(0xFFE5B83B)
+        TipoNotificacion.PEDIDO_RECIBIDO -> Icons.Outlined.Storefront to Color(0xFFA78BFA)
+        TipoNotificacion.GRABAR_PARTIDO -> Icons.Outlined.Videocam to Color(0xFFE07048)
+    }
+    return NotificacionItem(
+        id = id,
+        titulo = titulo,
+        descripcion = mensaje,
+        tiempo = tiempoRelativo(creadaEn),
+        icon = icono,
+        iconTint = color,
+        leida = leida
+    )
+}
+
+private val FORMATO_FECHA_HORA = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
+
+private fun tiempoRelativo(millis: Long): String {
+    val minutos = (System.currentTimeMillis() - millis) / 60_000
+    return when {
+        minutos < 1 -> "Ahora"
+        minutos < 60 -> "Hace $minutos min"
+        minutos < 24 * 60 -> "Hace ${minutos / 60} h"
+        else -> Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(FORMATO_FECHA_HORA)
     }
 }
 

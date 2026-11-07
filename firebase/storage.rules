@@ -1,0 +1,18 @@
+// Reglas de seguridad de Cloud Storage para SportyGo.
+// Copiar en: Consola de Firebase > Storage > Reglas > Publicar.
+//
+// Las imágenes se guardan en <carpeta>/<uid del dueño>/<archivo>
+// (usuarios, canchas, productos, equipos). Cada usuario solo escribe en su carpeta.
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{carpeta}/{uid}/{archivo} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && carpeta in ['usuarios', 'canchas', 'productos', 'equipos']
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

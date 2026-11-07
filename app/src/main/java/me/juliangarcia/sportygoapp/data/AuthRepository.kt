@@ -1,52 +1,35 @@
 package me.juliangarcia.sportygoapp.data
 
-import android.util.Base64
-import java.security.MessageDigest
-import java.security.SecureRandom
-import java.util.UUID
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.PBEKeySpec
+import android.util.Log
+import com.google.firebase.FirebaseNetworkException
+import com.google.firebase.FirebaseTooManyRequestsException
+import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.FirebaseAuthWeakPasswordException
+import kotlinx.coroutines.tasks.await
 
 sealed interface AuthResult {
     data class Exito(val usuario: User) : AuthResult
     data class Error(val mensaje: String) : AuthResult
 }
 
-/** Hash de contraseñas con PBKDF2 + salt aleatorio (disponible en Android 8+; minSdk = 28). */
-internal object PasswordHasher {
-    private const val ITERACIONES = 60_000
-    private const val LONGITUD_BITS = 256
+/**
+ * Cuentas (Firebase Authentication) y datos de la app (Firestore, ver [NubeDatos]).
+ * Las lecturas son inmediatas: salen de la copia en memoria que NubeDatos mantiene al día.
+ */
+class AuthRepository(private val nube: NubeDatos = NubeDatos) {
 
-    fun nuevoSalt(): String {
-        val bytes = ByteArray(16)
-        SecureRandom().nextBytes(bytes)
-        return Base64.encodeToString(bytes, Base64.NO_WRAP)
-    }
+    /** uid de la sesión guardada por Firebase (sobrevive a cerrar la app), o null. */
+    fun uidEnSesion(): String? = nube.auth.currentUser?.uid
 
-    fun hash(contrasena: String, salt: String): String {
-        val spec = PBEKeySpec(
-            contrasena.toCharArray(),
-            Base64.decode(salt, Base64.NO_WRAP),
-            ITERACIONES,
-            LONGITUD_BITS
-        )
-        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        return Base64.encodeToString(factory.generateSecret(spec).encoded, Base64.NO_WRAP)
-    }
+    fun usuarioEnSesion(): User? = uidEnSesion()?.let { nube.usuarios[it] }
 
-    fun iguales(a: String, b: String): Boolean =
-        MessageDigest.isEqual(a.toByteArray(), b.toByteArray())
-}
-
-class AuthRepository(private val storage: AccountStorage) {
-
-    fun usuarioEnSesion(): User? {
-        val id = storage.getSessionUserId() ?: return null
-        return storage.loadUsers().firstOrNull { it.id == id }
-    }
+    /** Empieza a sincronizar los datos del usuario [uid] y espera la primera carga. */
+    suspend fun cargarDatos(uid: String) = nube.escuchar(uid)
 
     /** Crea la cuenta y deja la sesión iniciada (el siguiente paso es elegir el perfil). */
-    fun registrar(
+    suspend fun registrar(
         nombreUsuario: String,
         correo: String,
         contrasena: String,
@@ -61,168 +44,224 @@ class AuthRepository(private val storage: AccountStorage) {
         Validaciones.contrasena(contrasena)?.let { return AuthResult.Error(it) }
         Validaciones.fechaNacimiento(fecha)?.let { return AuthResult.Error(it) }
 
-        val usuarios = storage.loadUsers()
-        if (usuarios.any { it.nombreUsuario.equals(nombre, ignoreCase = true) }) {
-            return AuthResult.Error("Ese nombre de usuario ya está en uso.")
+        return try {
+            if (!nube.nombreDisponible(nombre)) {
+                return AuthResult.Error("Ese nombre de usuario ya está en uso.")
+            }
+            val cuenta = nube.auth.createUserWithEmailAndPassword(email, contrasena).await().user
+                ?: return AuthResult.Error("No se pudo crear la cuenta. Intenta de nuevo.")
+            val nuevo = User(
+                id = cuenta.uid,
+                nombreUsuario = nombre,
+                correo = email,
+                fechaNacimiento = fecha
+            )
+            try {
+                nube.crearPerfil(nuevo)
+            } catch (e: Exception) {
+                // Sin perfil la cuenta queda inservible: se borra para poder intentarlo de nuevo.
+                Log.e(TAG, "No se pudo crear el perfil", e)
+                runCatching { cuenta.delete().await() }
+                nube.auth.signOut()
+                return AuthResult.Error(
+                    "No se pudo crear la cuenta. Puede que ese nombre de usuario ya esté en uso."
+                )
+            }
+            AuthResult.Exito(nuevo)
+        } catch (e: Exception) {
+            AuthResult.Error(mensajeDeError(e, registro = true))
         }
-        if (usuarios.any { it.correo.equals(email, ignoreCase = true) }) {
-            return AuthResult.Error("Ya existe una cuenta con ese correo.")
-        }
-
-        val salt = PasswordHasher.nuevoSalt()
-        val nuevo = User(
-            id = UUID.randomUUID().toString(),
-            nombreUsuario = nombre,
-            correo = email,
-            fechaNacimiento = fecha,
-            passwordHash = PasswordHasher.hash(contrasena, salt),
-            salt = salt
-        )
-        storage.saveUsers(usuarios + nuevo)
-        storage.setSessionUserId(nuevo.id)
-        return AuthResult.Exito(nuevo)
     }
 
-    /** Solo permite entrar con una cuenta que ya fue creada. */
-    fun iniciarSesion(identificador: String, contrasena: String): AuthResult {
+    /** Entra con el nombre de usuario o el correo de una cuenta ya creada. */
+    suspend fun iniciarSesion(identificador: String, contrasena: String): AuthResult {
         val ident = identificador.trim()
         if (ident.isEmpty() || contrasena.isEmpty()) {
             return AuthResult.Error("Completa todos los campos.")
         }
-
-        val usuario = storage.loadUsers().firstOrNull {
-            it.nombreUsuario.equals(ident, ignoreCase = true) ||
-                it.correo.equals(ident, ignoreCase = true)
-        } ?: return AuthResult.Error(
-            "No existe una cuenta con ese usuario o correo. Crea una cuenta primero."
-        )
-
-        val hash = PasswordHasher.hash(contrasena, usuario.salt)
-        if (!PasswordHasher.iguales(hash, usuario.passwordHash)) {
-            return AuthResult.Error("La contraseña es incorrecta.")
+        return try {
+            val correo = if ("@" in ident) ident else nube.correoDeNombre(ident)
+                ?: return AuthResult.Error(
+                    "No existe una cuenta con ese usuario o correo. Crea una cuenta primero."
+                )
+            val uid = nube.auth.signInWithEmailAndPassword(correo, contrasena).await().user?.uid
+                ?: return AuthResult.Error("No se pudo iniciar sesión. Intenta de nuevo.")
+            nube.escuchar(uid)
+            val usuario = nube.usuarios[uid]
+            if (usuario == null) {
+                cerrarSesion()
+                return AuthResult.Error("No se encontró el perfil de esta cuenta.")
+            }
+            AuthResult.Exito(usuario)
+        } catch (e: Exception) {
+            AuthResult.Error(mensajeDeError(e, registro = false))
         }
-
-        storage.setSessionUserId(usuario.id)
-        return AuthResult.Exito(usuario)
     }
 
-    fun cerrarSesion() = storage.setSessionUserId(null)
-
-    fun elegirRol(usuarioId: String, rol: UserRole): User? {
-        val usuarios = storage.loadUsers().toMutableList()
-        val indice = usuarios.indexOfFirst { it.id == usuarioId }
-        if (indice < 0) return null
-        val actualizado = usuarios[indice].copy(rol = rol)
-        usuarios[indice] = actualizado
-        storage.saveUsers(usuarios)
-        return actualizado
+    fun cerrarSesion() {
+        nube.detener()
+        nube.auth.signOut()
     }
+
+    private fun mensajeDeError(e: Exception, registro: Boolean): String {
+        Log.w(TAG, "Error de autenticación", e)
+        return when (e) {
+            is FirebaseNetworkException -> "Sin conexión a internet. Revisa tu red e intenta de nuevo."
+            is FirebaseTooManyRequestsException ->
+                "Demasiados intentos. Espera unos minutos e intenta de nuevo."
+            is FirebaseAuthUserCollisionException -> "Ya existe una cuenta con ese correo."
+            is FirebaseAuthWeakPasswordException -> "La contraseña es muy débil. Usa una más larga."
+            is FirebaseAuthInvalidUserException ->
+                "No existe una cuenta con ese usuario o correo. Crea una cuenta primero."
+            is FirebaseAuthInvalidCredentialsException ->
+                if (registro) "El correo no es válido." else "El usuario o la contraseña son incorrectos."
+            else -> if (registro) "No se pudo crear la cuenta. Intenta de nuevo."
+            else "No se pudo iniciar sesión. Intenta de nuevo."
+        }
+    }
+
+    // ---------- Perfil ----------
+
+    fun elegirRol(usuarioId: String, rol: UserRole): User? =
+        actualizarUsuario(usuarioId, mapOf("rol" to rol.name)) { it.copy(rol = rol) }
 
     fun actualizarFotoPerfil(usuarioId: String, fotoUri: String?): User? {
-        val usuarios = storage.loadUsers().toMutableList()
-        val indice = usuarios.indexOfFirst { it.id == usuarioId }
-        if (indice < 0) return null
-        val actualizado = usuarios[indice].copy(fotoPerfilUri = fotoUri)
-        usuarios[indice] = actualizado
-        storage.saveUsers(usuarios)
+        val actualizado = actualizarUsuario(usuarioId, mapOf("fotoPerfilUri" to fotoUri)) {
+            it.copy(fotoPerfilUri = fotoUri)
+        }
+        if (fotoUri != null) {
+            nube.subirImagen(fotoUri, "usuarios/$usuarioId/perfil-${System.currentTimeMillis()}") { url ->
+                // Solo si no la cambió otra vez mientras se subía.
+                if (nube.usuarios[usuarioId]?.fotoPerfilUri == fotoUri) {
+                    actualizarUsuario(usuarioId, mapOf("fotoPerfilUri" to url)) {
+                        it.copy(fotoPerfilUri = url)
+                    }
+                }
+            }
+        }
         return actualizado
     }
 
-    fun actualizarNequi(usuarioId: String, nequi: String?): User? {
-        val usuarios = storage.loadUsers().toMutableList()
-        val indice = usuarios.indexOfFirst { it.id == usuarioId }
-        if (indice < 0) return null
-        val actualizado = usuarios[indice].copy(nequi = nequi)
-        usuarios[indice] = actualizado
-        storage.saveUsers(usuarios)
-        return actualizado
+    fun actualizarNequi(usuarioId: String, nequi: String?): User? =
+        actualizarUsuario(usuarioId, mapOf("nequi" to nequi)) { it.copy(nequi = nequi) }
+
+    private fun actualizarUsuario(
+        usuarioId: String,
+        campos: Map<String, Any?>,
+        cambio: (User) -> User
+    ): User? {
+        if (nube.usuarios[usuarioId] == null) return null
+        nube.usuarios.actualizar(usuarioId, campos, cambio)
+        return nube.usuarios[usuarioId]
     }
 
-    fun usuarioPorId(id: String): User? = storage.loadUsers().firstOrNull { it.id == id }
+    fun usuarioPorId(id: String): User? = nube.usuarios[id]
 
     // ---------- Canchas ----------
 
-    fun canchaDe(ownerId: String): Cancha? =
-        storage.loadCanchas().firstOrNull { it.ownerId == ownerId }
+    fun canchaDe(ownerId: String): Cancha? = nube.canchas.todos.firstOrNull { it.ownerId == ownerId }
 
-    fun canchaPorId(id: String): Cancha? =
-        storage.loadCanchas().firstOrNull { it.id == id }
+    fun canchaPorId(id: String): Cancha? = nube.canchas[id]
 
     /** Todas las canchas registradas por los dueños (las que ve el jugador para reservar). */
-    fun todasLasCanchas(): List<Cancha> = storage.loadCanchas()
+    fun todasLasCanchas(): List<Cancha> = nube.canchas.todos
 
+    /**
+     * Crea o actualiza la cancha del dueño (una por dueño). Si el dueño ya tenía cancha se
+     * conserva su id, para que sus reservas y productos sigan apuntando a ella.
+     */
     fun guardarCancha(cancha: Cancha) {
-        val otras = storage.loadCanchas().filter { it.ownerId != cancha.ownerId }
-        storage.saveCanchas(otras + cancha)
+        val anterior = canchaDe(cancha.ownerId)
+        val aGuardar = if (anterior != null) cancha.copy(id = anterior.id) else cancha
+        nube.canchas.guardar(aGuardar.id, aGuardar)
+        val id = aGuardar.id
+        nube.subirImagen(aGuardar.imagenUri, "canchas/${aGuardar.ownerId}/$id-${System.currentTimeMillis()}") { url ->
+            if (nube.canchas[id]?.imagenUri == aGuardar.imagenUri) {
+                nube.canchas.actualizar(id, mapOf("imagenUri" to url)) { it.copy(imagenUri = url) }
+            }
+        }
+    }
+
+    // ---------- Equipos ----------
+
+    fun todosLosEquipos(): List<Equipo> = nube.equipos.todos
+
+    fun equiposDe(usuarioId: String): List<Equipo> =
+        nube.equipos.todos.filter { it.creadorId == usuarioId }
+
+    fun equipoPorId(id: String): Equipo? = nube.equipos[id]
+
+    /** Crea el equipo o lo reemplaza si ya existe uno con el mismo id. */
+    fun guardarEquipo(equipo: Equipo) {
+        nube.equipos.guardar(equipo.id, equipo)
+        nube.subirImagen(equipo.escudoUri, "equipos/${equipo.creadorId}/${equipo.id}-${System.currentTimeMillis()}") { url ->
+            if (nube.equipos[equipo.id]?.escudoUri == equipo.escudoUri) {
+                nube.equipos.actualizar(equipo.id, mapOf("escudoUri" to url)) { it.copy(escudoUri = url) }
+            }
+        }
     }
 
     // ---------- Productos del kiosco ----------
 
     fun productosDeCancha(canchaId: String): List<Producto> =
-        storage.loadProductos().filter { it.canchaId == canchaId }
+        nube.productos.todos.filter { it.canchaId == canchaId }
 
     /** Crea el producto o lo reemplaza si ya existe uno con el mismo id. */
     fun guardarProducto(producto: Producto) {
-        val otros = storage.loadProductos().filter { it.id != producto.id }
-        storage.saveProductos(otros + producto)
+        nube.productos.guardar(producto.id, producto)
+        val ownerId = nube.canchas[producto.canchaId]?.ownerId ?: return
+        nube.subirImagen(producto.imagenUri, "productos/$ownerId/${producto.id}-${System.currentTimeMillis()}") { url ->
+            if (nube.productos[producto.id]?.imagenUri == producto.imagenUri) {
+                nube.productos.actualizar(producto.id, mapOf("imagenUri" to url)) { it.copy(imagenUri = url) }
+            }
+        }
     }
 
-    fun eliminarProducto(id: String) {
-        storage.saveProductos(storage.loadProductos().filter { it.id != id })
-    }
+    fun eliminarProducto(id: String) = nube.productos.borrar(id)
 
     // ---------- Reservas ----------
 
     fun reservasDeUsuario(usuarioId: String): List<Reserva> =
-        storage.loadReservas().filter { it.usuarioId == usuarioId }
+        nube.reservas.todos.filter { it.usuarioId == usuarioId }
 
     fun reservasDeCancha(canchaId: String): List<Reserva> =
-        storage.loadReservas().filter { it.canchaId == canchaId }
+        nube.reservas.todos.filter { it.canchaId == canchaId }
 
-    fun guardarReserva(reserva: Reserva) {
-        storage.saveReservas(storage.loadReservas() + reserva)
-    }
+    fun guardarReserva(reserva: Reserva) = nube.reservas.guardar(reserva.id, reserva)
 
-    fun reservaPorId(id: String): Reserva? = storage.loadReservas().firstOrNull { it.id == id }
+    fun reservaPorId(id: String): Reserva? = nube.reservas[id]
 
-    fun actualizarReserva(reserva: Reserva) {
-        storage.saveReservas(storage.loadReservas().map { if (it.id == reserva.id) reserva else it })
-    }
-
-    /** Todas las reservas hechas en este teléfono (para reprogramar los avisos). */
-    fun todasLasReservas(): List<Reserva> = storage.loadReservas()
+    fun actualizarReserva(reserva: Reserva) = nube.reservas.guardar(reserva.id, reserva)
 
     // ---------- Grabaciones ----------
 
     fun grabacionesDeUsuario(usuarioId: String): List<Grabacion> =
-        storage.loadGrabaciones().filter { it.usuarioId == usuarioId }
+        nube.grabaciones.todos.filter { it.usuarioId == usuarioId }
 
-    fun grabacionPorId(id: String): Grabacion? =
-        storage.loadGrabaciones().firstOrNull { it.id == id }
+    fun grabacionPorId(id: String): Grabacion? = nube.grabaciones[id]
 
     fun reservaYaGrabada(reservaId: String): Boolean =
-        storage.loadGrabaciones().any { it.reservaId == reservaId }
+        nube.grabaciones.todos.any { it.reservaId == reservaId }
 
-    fun guardarGrabacion(grabacion: Grabacion) {
-        storage.saveGrabaciones(storage.loadGrabaciones() + grabacion)
-    }
+    /** Los videos se quedan en el teléfono que grabó; en la nube solo se guarda el registro. */
+    fun guardarGrabacion(grabacion: Grabacion) = nube.grabaciones.guardar(grabacion.id, grabacion)
 
-    fun reservasSinGrabar(): Set<String> = storage.loadReservasSinGrabar()
+    fun reservasSinGrabar(): Set<String> =
+        nube.reservas.todos.filter { it.sinGrabar }.map { it.id }.toSet()
 
-    fun marcarSinGrabar(reservaId: String) {
-        storage.saveReservasSinGrabar(storage.loadReservasSinGrabar() + reservaId)
-    }
+    fun marcarSinGrabar(reservaId: String) =
+        nube.reservas.actualizar(reservaId, mapOf("sinGrabar" to true)) { it.copy(sinGrabar = true) }
 
     // ---------- Notificaciones ----------
 
     fun notificacionesDe(usuarioId: String): List<Notificacion> =
-        storage.loadNotificaciones()
+        nube.notificaciones.todos
             .filter { it.usuarioId == usuarioId }
             .sortedByDescending { it.creadaEn }
 
-    fun guardarNotificacion(notificacion: Notificacion) {
-        storage.saveNotificaciones(storage.loadNotificaciones() + notificacion)
-    }
+    /** Guarda la notificación en la bandeja de su usuario (puede ser otra persona). */
+    fun guardarNotificacion(notificacion: Notificacion) =
+        nube.notificaciones.guardar(notificacion.id, notificacion)
 
     /** Aplica [cambio] a las notificaciones de [usuarioId] que cumplan [filtro]. */
     fun actualizarNotificaciones(
@@ -230,10 +269,12 @@ class AuthRepository(private val storage: AccountStorage) {
         filtro: (Notificacion) -> Boolean,
         cambio: (Notificacion) -> Notificacion
     ) {
-        storage.saveNotificaciones(
-            storage.loadNotificaciones().map {
-                if (it.usuarioId == usuarioId && filtro(it)) cambio(it) else it
-            }
-        )
+        nube.notificaciones.todos
+            .filter { it.usuarioId == usuarioId && filtro(it) }
+            .forEach { nube.notificaciones.guardar(it.id, cambio(it)) }
+    }
+
+    private companion object {
+        const val TAG = "AuthRepository"
     }
 }

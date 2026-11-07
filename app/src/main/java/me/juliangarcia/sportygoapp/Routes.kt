@@ -20,6 +20,7 @@ object Routes {
     // Notificaciones, Equipos y Perfil
     const val NOTIFICATIONS = "notifications"
     const val TEAMS = "teams"
+    const val CREAR_EQUIPO = "crear_equipo"
     const val PROFILE = "profile"
 
     // Pagos con Nequi

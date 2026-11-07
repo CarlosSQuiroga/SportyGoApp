@@ -4,8 +4,8 @@ package me.juliangarcia.sportygoapp.data
 enum class UserRole { JUGADOR, DUENIO }
 
 /**
- * Cuenta guardada en el dispositivo.
- * La contraseña NUNCA se guarda en texto plano: solo su hash (PBKDF2) y el salt.
+ * Perfil de una cuenta (documento usuarios/{id} en Firestore; [id] es el uid de Firebase Auth).
+ * La contraseña no se guarda aquí: la maneja Firebase Authentication.
  * [rol] es null hasta que el usuario elige "Soy jugador" o "Soy dueño de cancha".
  * Una cuenta nueva empieza sin foto de perfil ([fotoPerfilUri] = null).
  */
@@ -14,10 +14,8 @@ data class User(
     val nombreUsuario: String,
     val correo: String,
     val fechaNacimiento: String,
-    val passwordHash: String,
-    val salt: String,
     val rol: UserRole? = null,
-    /** Ruta local (file://) de la foto de perfil elegida desde los archivos del teléfono. */
+    /** URL de la foto de perfil (Cloud Storage), o ruta local mientras se sube. */
     val fotoPerfilUri: String? = null,
     /**
      * Número de celular Nequi (10 dígitos, empieza por 3). Jugador: desde aquí paga.
@@ -103,7 +101,36 @@ data class Grabacion(
     val horaReserva: String = "",
     val nombreCancha: String = "",
     /** Reserva en la que se grabó (vacío = grabaciones antiguas sin reserva asociada). */
-    val reservaId: String = ""
+    val reservaId: String = "",
+    /** Equipo que hizo la reserva (vacío = sin equipo). El nombre se copia al grabar. */
+    val equipoId: String = "",
+    val nombreEquipo: String = "",
+    /** Equipo contrincante elegido al grabar (vacío = sin rival registrado). */
+    val rivalId: String = "",
+    val nombreRival: String = ""
+) {
+    /** "Los Halcones vs Real Barrio", o null si la grabación no tiene equipos. */
+    val enfrentamiento: String?
+        get() = when {
+            nombreEquipo.isBlank() && nombreRival.isBlank() -> null
+            nombreRival.isBlank() -> nombreEquipo
+            else -> "${nombreEquipo.ifBlank { "Sin equipo" }} vs $nombreRival"
+        }
+}
+
+/**
+ * Equipo creado por un usuario. Se puede elegir al reservar (el equipo que reserva)
+ * y al grabar el partido (como equipo contrincante).
+ */
+data class Equipo(
+    val id: String = "",
+    /** Usuario que creó el equipo. */
+    val creadorId: String = "",
+    val nombre: String = "",
+    /** Ruta local (file://) de la imagen del escudo. Vacío = escudo con la inicial. */
+    val escudoUri: String = "",
+    /** Momento de creación (epoch millis). */
+    val creadoEn: Long = 0L
 )
 
 /**
@@ -154,7 +181,12 @@ data class Reserva(
     val pagoId: String = "",
     /** Nequi del jugador que paga y del dueño que recibe. */
     val nequiPagador: String = "",
-    val nequiDestino: String = ""
+    val nequiDestino: String = "",
+    /** Equipo que hizo la reserva (opcional). El nombre se copia al reservar. */
+    val equipoId: String = "",
+    val nombreEquipo: String = "",
+    /** El anfitrión eligió "Ahora no": no se vuelve a abrir la cámara para esta reserva. */
+    val sinGrabar: Boolean = false
 ) {
     val totalProductos: Int get() = productos.sumOf { it.subtotal }
     val total: Int get() = precio + totalProductos

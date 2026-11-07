@@ -7,6 +7,8 @@ import me.juliangarcia.sportygoapp.Routes
 import me.juliangarcia.sportygoapp.avisos.Avisos
 import me.juliangarcia.sportygoapp.pagos.EstadoPago
 import me.juliangarcia.sportygoapp.pagos.PasarelaPagos
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -26,7 +28,16 @@ class AuthState(
     private val pagos: PasarelaPagos? = null
 ) {
 
-    var usuario: User? by mutableStateOf(repo.usuarioEnSesion())
+    private val scope = MainScope()
+
+    /**
+     * true mientras se descargan los datos de la sesión guardada al abrir la app. La
+     * navegación espera a que termine para saber a qué pantalla ir.
+     */
+    var cargando: Boolean by mutableStateOf(true)
+        private set
+
+    var usuario: User? by mutableStateOf(null)
         private set
 
     /** Cancha del dueño en sesión (null si es jugador o aún no la registra). */
@@ -53,8 +64,33 @@ class AuthState(
     var misProductos: List<Producto> by mutableStateOf(emptyList())
         private set
 
+    /** Equipos creados por el usuario en sesión (los que puede elegir al reservar). */
+    var misEquipos: List<Equipo> by mutableStateOf(emptyList())
+        private set
+
     init {
+        // Cambios que llegan de la nube (otro teléfono reservó, aceptaron un pago, etc.).
+        NubeDatos.onCambio = {
+            usuario?.let { actual -> usuario = repo.usuarioPorId(actual.id) ?: actual }
+            recargarDatosDeUsuario()
+        }
+        scope.launch {
+            // Firebase recuerda la sesión: si había una, se descargan sus datos antes de mostrar nada.
+            val uid = repo.uidEnSesion()
+            if (uid != null) {
+                repo.cargarDatos(uid)
+                usuario = repo.usuarioEnSesion()
+                if (usuario == null) repo.cerrarSesion() // la cuenta ya no tiene perfil
+                alEntrar()
+            }
+            cargando = false
+        }
+    }
+
+    /** Al abrir la app o iniciar sesión: cargar los datos y programar los avisos de grabación. */
+    private fun alEntrar() {
         recargarDatosDeUsuario()
+        avisos?.reprogramar(misReservas)
     }
 
     /**
@@ -74,8 +110,10 @@ class AuthState(
             reservasDeMiCancha = emptyList()
             misNotificaciones = emptyList()
             misProductos = emptyList()
+            misEquipos = emptyList()
             return
         }
+        misEquipos = repo.equiposDe(u.id).sortedBy { it.nombre.lowercase() }
         cancha = if (u.rol == UserRole.DUENIO) repo.canchaDe(u.id) else null
         misProductos = cancha?.let { productosDeCancha(it.id) } ?: emptyList()
         misReservas = repo.reservasDeUsuario(u.id)
@@ -89,13 +127,14 @@ class AuthState(
     }
 
     /** Devuelve un mensaje de error, o null si la cuenta se creó (y la sesión quedó iniciada). */
-    fun registrar(
+    suspend fun registrar(
         nombreUsuario: String,
         correo: String,
         contrasena: String,
         fechaNacimiento: String
     ): String? = when (val r = repo.registrar(nombreUsuario, correo, contrasena, fechaNacimiento)) {
         is AuthResult.Exito -> {
+            repo.cargarDatos(r.usuario.id)
             usuario = r.usuario
             recargarDatosDeUsuario() // cuenta nueva: todo vacío
             notificar(
@@ -118,11 +157,11 @@ class AuthState(
     }
 
     /** Devuelve un mensaje de error, o null si el inicio de sesión fue correcto. */
-    fun iniciarSesion(identificador: String, contrasena: String): String? =
+    suspend fun iniciarSesion(identificador: String, contrasena: String): String? =
         when (val r = repo.iniciarSesion(identificador, contrasena)) {
             is AuthResult.Exito -> {
                 usuario = r.usuario
-                recargarDatosDeUsuario()
+                alEntrar()
                 null
             }
             is AuthResult.Error -> r.mensaje
@@ -180,7 +219,8 @@ class AuthState(
             kiosco = cancha?.kiosco ?: ""
         )
         repo.guardarCancha(nueva)
-        cancha = nueva
+        // Se relee lo guardado (el repositorio conserva el id si el dueño ya tenía cancha).
+        cancha = repo.canchaDe(actual.id) ?: nueva
         return null
     }
 
@@ -192,7 +232,9 @@ class AuthState(
         canchaId: String,
         fecha: LocalDate?,
         hora: String?,
-        carrito: Map<String, Int> = emptyMap()
+        carrito: Map<String, Int> = emptyMap(),
+        /** Equipo del jugador que hace la reserva (null = sin equipo). */
+        equipoId: String? = null
     ): String? {
         val actual = usuario ?: return "Debes iniciar sesión."
         val c = repo.canchaPorId(canchaId) ?: return "La cancha ya no está disponible."
@@ -219,6 +261,12 @@ class AuthState(
         }
         val total = c.precioHora + compra.sumOf { it.subtotal }
 
+        // Solo puede reservar a nombre de un equipo que creó.
+        val equipo = equipoId?.let { id ->
+            repo.equipoPorId(id)?.takeIf { it.creadorId == actual.id }
+                ?: return "Ese equipo ya no existe. Elige otro o reserva sin equipo."
+        }
+
         // Se envía el cobro al Nequi del jugador. La reserva aparta el horario, pero solo
         // queda confirmada cuando el jugador acepta el pago (ver sincronizarPagos).
         val cobro = pasarela.solicitarCobro(
@@ -241,7 +289,9 @@ class AuthState(
             estado = EstadoReserva.PENDIENTE_PAGO,
             pagoId = cobro.id,
             nequiPagador = nequiJugador,
-            nequiDestino = nequiDuenio
+            nequiDestino = nequiDuenio,
+            equipoId = equipo?.id.orEmpty(),
+            nombreEquipo = equipo?.nombre.orEmpty()
         )
         repo.guardarReserva(reserva)
 
@@ -270,8 +320,10 @@ class AuthState(
      */
     fun sincronizarPagos() {
         val pasarela = pagos ?: return
+        val u = usuario ?: return
         var cambio = false
-        repo.todasLasReservas()
+        // Los cobros los responde el jugador desde su teléfono: se revisan sus propias reservas.
+        repo.reservasDeUsuario(u.id)
             .filter { it.estado == EstadoReserva.PENDIENTE_PAGO && it.pagoId.isNotBlank() }
             .forEach { r ->
                 when (pasarela.consultarEstado(r.pagoId)) {
@@ -527,9 +579,15 @@ class AuthState(
     /** El anfitrión decidió no grabar esta reserva: no se vuelve a abrir la cámara para ella. */
     fun omitirGrabacion(reservaId: String) = repo.marcarSinGrabar(reservaId)
 
-    /** Guarda el video grabado en "Grabaciones". */
-    fun guardarGrabacion(reserva: Reserva, videoUri: String) {
+    /**
+     * Guarda el video grabado en "Grabaciones", con el equipo que reservó y, si se eligió,
+     * el equipo contrincante ([rivalId]).
+     */
+    fun guardarGrabacion(reserva: Reserva, videoUri: String, rivalId: String? = null) {
         val u = usuario ?: return
+        // El nombre guardado en la reserva sirve si el equipo se borra después.
+        val equipo = reserva.equipoId.takeIf { it.isNotBlank() }?.let { repo.equipoPorId(it) }
+        val rival = rivalId?.let { repo.equipoPorId(it) }
         repo.guardarGrabacion(
             Grabacion(
                 id = UUID.randomUUID().toString(),
@@ -538,10 +596,53 @@ class AuthState(
                 fechaGuardado = LocalDate.now().format(FORMATO_FECHA),
                 horaReserva = reserva.hora,
                 nombreCancha = reserva.nombreCancha,
-                reservaId = reserva.id
+                reservaId = reserva.id,
+                equipoId = reserva.equipoId,
+                nombreEquipo = equipo?.nombre ?: reserva.nombreEquipo,
+                rivalId = rival?.id.orEmpty(),
+                nombreRival = rival?.nombre.orEmpty()
             )
         )
         misGrabaciones = repo.grabacionesDeUsuario(u.id)
+    }
+
+    // ---------------------------------------------------------------
+    // Equipos
+    // ---------------------------------------------------------------
+
+    /** Todos los equipos registrados en la app (para elegir el contrincante). */
+    fun todosLosEquipos(): List<Equipo> =
+        repo.todosLosEquipos().sortedBy { it.nombre.lowercase() }
+
+    fun equipoPorId(id: String): Equipo? = repo.equipoPorId(id)
+
+    fun nombreDeUsuario(id: String): String? = repo.usuarioPorId(id)?.nombreUsuario
+
+    /**
+     * Crea un equipo del usuario en sesión con su nombre y la imagen del escudo (opcional).
+     * Devuelve un mensaje de error, o null si quedó guardado.
+     */
+    fun crearEquipo(nombre: String, escudoUri: String): String? {
+        val actual = usuario ?: return "Debes iniciar sesión."
+        val limpio = nombre.trim().replace(Regex("\\s+"), " ")
+        if (limpio.isEmpty()) return "Escribe el nombre del equipo."
+        if (limpio.length < 3) return "El nombre debe tener al menos 3 caracteres."
+        if (limpio.length > 30) return "El nombre es muy largo (máximo 30 caracteres)."
+        // Los nombres son únicos en la app, para distinguir al contrincante al grabar.
+        if (repo.todosLosEquipos().any { it.nombre.equals(limpio, ignoreCase = true) }) {
+            return "Ya existe un equipo con ese nombre."
+        }
+        repo.guardarEquipo(
+            Equipo(
+                id = UUID.randomUUID().toString(),
+                creadorId = actual.id,
+                nombre = limpio,
+                escudoUri = escudoUri,
+                creadoEn = System.currentTimeMillis()
+            )
+        )
+        misEquipos = repo.equiposDe(actual.id).sortedBy { it.nombre.lowercase() }
+        return null
     }
 
     fun grabacionPorId(id: String): Grabacion? =

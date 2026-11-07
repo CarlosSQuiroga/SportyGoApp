@@ -1,0 +1,78 @@
+// Reglas de seguridad de Cloud Firestore para SportyGo.
+// Copiar en: Consola de Firebase > Firestore Database > Reglas > Publicar.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logueado() { return request.auth != null; }
+    function soyYo(uid) { return logueado() && request.auth.uid == uid; }
+    function nuevo() { return request.resource.data; }
+
+    // Perfil de cada cuenta. Todos los usuarios con sesión lo pueden leer (nombre, rol y
+    // Nequi del dueño para pagarle); solo el dueño de la cuenta lo modifica.
+    match /usuarios/{uid} {
+      allow read: if logueado();
+      allow create, update: if soyYo(uid);
+      allow delete: if false;
+    }
+
+    // Nombre de usuario -> correo, para iniciar sesión con el nombre (se lee sin sesión).
+    // Solo se crea una vez: así ningún otro usuario puede quedarse con un nombre ya tomado.
+    match /nombresUsuario/{nombre} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if logueado() && nuevo().uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /canchas/{canchaId} {
+      allow read: if logueado();
+      allow create: if logueado() && nuevo().ownerId == request.auth.uid;
+      allow update: if logueado() && resource.data.ownerId == request.auth.uid
+                    && nuevo().ownerId == resource.data.ownerId;
+      allow delete: if logueado() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Productos del kiosco: solo el dueño de la cancha los crea, edita o borra.
+    match /productos/{productoId} {
+      function esDuenioDe(canchaId) {
+        return get(/databases/$(database)/documents/canchas/$(canchaId)).data.ownerId
+               == request.auth.uid;
+      }
+      allow read: if logueado();
+      allow create: if logueado() && esDuenioDe(nuevo().canchaId);
+      allow update, delete: if logueado() && esDuenioDe(resource.data.canchaId);
+    }
+
+    match /equipos/{equipoId} {
+      allow read: if logueado();
+      allow create: if logueado() && nuevo().creadorId == request.auth.uid;
+      allow update: if logueado() && resource.data.creadorId == request.auth.uid
+                    && nuevo().creadorId == resource.data.creadorId;
+      allow delete: if logueado() && resource.data.creadorId == request.auth.uid;
+    }
+
+    // Todas las reservas se leen para saber qué horarios están ocupados.
+    // Solo el jugador que reservó la crea y la actualiza (pago, "Ahora no" al grabar).
+    match /reservas/{reservaId} {
+      allow read: if logueado();
+      allow create: if logueado() && nuevo().usuarioId == request.auth.uid;
+      allow update: if logueado() && resource.data.usuarioId == request.auth.uid
+                    && nuevo().usuarioId == resource.data.usuarioId;
+      allow delete: if false;
+    }
+
+    // Grabaciones: privadas de cada usuario.
+    match /grabaciones/{grabacionId} {
+      allow read, update, delete: if logueado() && resource.data.usuarioId == request.auth.uid;
+      allow create: if logueado() && nuevo().usuarioId == request.auth.uid;
+    }
+
+    // Notificaciones: cualquiera con sesión puede enviar una (p. ej. el jugador avisa al
+    // dueño de una nueva reserva), pero solo el destinatario las lee y las marca.
+    match /notificaciones/{notificacionId} {
+      allow create: if logueado();
+      allow read, update, delete: if logueado() && resource.data.usuarioId == request.auth.uid;
+    }
+  }
+}

@@ -3,8 +3,11 @@ package me.juliangarcia.sportygoapp.avisos
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import me.juliangarcia.sportygoapp.data.AccountStorage
-import me.juliangarcia.sportygoapp.data.AuthRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import me.juliangarcia.sportygoapp.data.NubeDatos
 import me.juliangarcia.sportygoapp.data.Notificacion
 import me.juliangarcia.sportygoapp.data.TipoNotificacion
 import java.util.UUID
@@ -17,9 +20,26 @@ class RecordatorioReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val reservaId = intent.getStringExtra(EXTRA_RESERVA_ID) ?: return
-        val repo = AuthRepository(AccountStorage(context))
-        val reserva = repo.reservaPorId(reservaId) ?: return
-        if (repo.reservaYaGrabada(reservaId) || reservaId in repo.reservasSinGrabar()) return
+        // Solo avisa al usuario que tiene la sesión abierta en este teléfono.
+        val uid = NubeDatos.auth.currentUser?.uid ?: return
+
+        // Consultar Firestore toma un momento: se mantiene vivo el receptor mientras tanto.
+        val pendiente = goAsync()
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                withTimeoutOrNull(8_000) { avisar(context.applicationContext, reservaId, uid) }
+            } finally {
+                pendiente.finish()
+            }
+        }
+    }
+
+    private suspend fun avisar(context: Context, reservaId: String, uid: String) {
+        val reserva = NubeDatos.reservas.leerRemoto(reservaId) ?: return
+        if (reserva.usuarioId != uid || reserva.sinGrabar) return
+        val yaGrabada = NubeDatos.grabaciones.buscarRemoto("usuarioId", uid)
+            .any { it.reservaId == reservaId }
+        if (yaGrabada) return
 
         val notificacion = Notificacion(
             id = UUID.randomUUID().toString(),
@@ -31,7 +51,7 @@ class RecordatorioReceiver : BroadcastReceiver() {
             creadaEn = System.currentTimeMillis(),
             mostrada = true
         )
-        repo.guardarNotificacion(notificacion)
+        NubeDatos.notificaciones.guardar(notificacion.id, notificacion)
         Avisos(context).apply {
             crearCanales()
             mostrar(notificacion)

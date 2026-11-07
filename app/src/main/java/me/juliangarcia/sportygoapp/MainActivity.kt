@@ -11,15 +11,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import me.juliangarcia.sportygoapp.avisos.Avisos
-import me.juliangarcia.sportygoapp.data.AccountStorage
 import me.juliangarcia.sportygoapp.data.AuthRepository
 import me.juliangarcia.sportygoapp.data.AuthState
 import me.juliangarcia.sportygoapp.pagos.NequiSimulado
@@ -35,13 +37,10 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         )
 
-        // Cuentas y sesión guardadas en el dispositivo.
-        val repo = AuthRepository(AccountStorage(applicationContext))
-        val avisos = Avisos(applicationContext).apply {
-            crearCanales()
-            // Asegura que todas las reservas futuras tengan su aviso para grabar.
-            reprogramar(repo.todasLasReservas())
-        }
+        // Cuentas en Firebase Auth y datos en Firestore (ver NubeDatos).
+        val repo = AuthRepository()
+        // Los avisos de grabación se reprograman al cargar las reservas del usuario (AuthState).
+        val avisos = Avisos(applicationContext).apply { crearCanales() }
         // Cobros por Nequi: de prueba hasta conectar la app con Nequi a través de un servidor.
         val nequi = NequiSimulado(applicationContext)
         val auth = AuthState(repo, avisos, nequi)
@@ -67,15 +66,22 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color(0xFF0B131D)
                 ) {
-                    SportyGoNavHost(
-                        auth = auth,
-                        nequi = nequi,
-                        // Evita que el contenido quede debajo de la barra de estado,
-                        // la barra de navegación y el teclado.
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .safeDrawingPadding()
-                    )
+                    if (auth.cargando) {
+                        // Descargando los datos de la sesión guardada.
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color(0xFF66F08A))
+                        }
+                    } else {
+                        SportyGoNavHost(
+                            auth = auth,
+                            nequi = nequi,
+                            // Evita que el contenido quede debajo de la barra de estado,
+                            // la barra de navegación y el teclado.
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .safeDrawingPadding()
+                        )
+                    }
                 }
             }
         }

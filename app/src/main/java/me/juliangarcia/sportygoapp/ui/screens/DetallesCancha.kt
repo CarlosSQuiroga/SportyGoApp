@@ -41,7 +41,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import me.juliangarcia.sportygoapp.data.Cancha
+import me.juliangarcia.sportygoapp.data.Equipo
 import me.juliangarcia.sportygoapp.data.Producto
 
 // Definición de paleta de colores para la interfaz
@@ -71,7 +74,12 @@ fun DetallesCanchaScreen(
     productos: List<Producto> = emptyList(),
     /** Id del producto -> cantidad elegida. */
     cantidades: Map<String, Int> = emptyMap(),
+    /** Equipos del jugador (puede reservar a nombre de uno, opcional). */
+    equipos: List<Equipo> = emptyList(),
+    equipoSeleccionadoId: String? = null,
     errorMensaje: String? = null,
+    onEquipoSelected: (String?) -> Unit = {},
+    onCrearEquipoClick: () -> Unit = {},
     onBackClick: () -> Unit = {},
     onDiaSelected: (Int) -> Unit = {},
     onHoraSelected: (String) -> Unit = {},
@@ -240,6 +248,64 @@ fun DetallesCanchaScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
+                // Equipo que hace la reserva (opcional).
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = DarkCardBackground, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "¿Reservas con tu equipo?",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextWhite
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Opcional. El equipo quedará registrado en la reserva y en la grabación del partido.",
+                    fontSize = 13.sp,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                if (equipos.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Aún no tienes equipos.",
+                            fontSize = 14.sp,
+                            color = TextSecondary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Crear equipo",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PrimaryGreen,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onCrearEquipoClick() }
+                                .padding(4.dp)
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ChipEquipo(
+                            nombre = "Sin equipo",
+                            escudoUri = null,
+                            isSelected = equipoSeleccionadoId == null,
+                            onClick = { onEquipoSelected(null) }
+                        )
+                        equipos.forEach { equipo ->
+                            ChipEquipo(
+                                nombre = equipo.nombre,
+                                escudoUri = equipo.escudoUri,
+                                isSelected = equipo.id == equipoSeleccionadoId,
+                                onClick = { onEquipoSelected(equipo.id) }
+                            )
+                        }
+                    }
+                }
+
                 // Productos del kiosco (opcional): se pagan con la reserva y se reclaman en la cancha.
                 if (productos.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
@@ -291,6 +357,10 @@ fun DetallesCanchaScreen(
                             .background(DarkCardBackground)
                             .padding(16.dp)
                     ) {
+                        equipos.firstOrNull { it.id == equipoSeleccionadoId }?.let { equipo ->
+                            LineaResumen("Reserva a nombre de", equipo.nombre)
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
                         LineaResumen("Cancha (1 hora)", formatearPrecio(cancha.precioHora))
                         if (unidades > 0) {
                             Spacer(modifier = Modifier.height(6.dp))
@@ -339,6 +409,40 @@ fun DetallesCanchaScreen(
                 )
             }
         }
+    }
+}
+
+/** Chip para elegir el equipo de la reserva ([escudoUri] null = opción "Sin equipo"). */
+@Composable
+private fun ChipEquipo(
+    nombre: String,
+    escudoUri: String?,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) SelectedChipBackground else DarkChipBackground)
+            .border(
+                width = 1.dp,
+                color = if (isSelected) PrimaryGreen else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (escudoUri != null) {
+            EscudoDeEquipo(nombre = nombre, escudoUri = escudoUri, alto = 28.dp)
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+        Text(
+            text = nombre,
+            fontSize = 14.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            color = if (isSelected) PrimaryGreen else TextWhite
+        )
     }
 }
 

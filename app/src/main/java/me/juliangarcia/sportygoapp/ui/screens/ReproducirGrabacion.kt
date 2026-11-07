@@ -77,7 +77,11 @@ fun ReproducirGrabacionScreen(grabacion: Grabacion, onBackClick: () -> Unit) {
                     color = TextWhite
                 )
                 Text(
-                    text = listOf(grabacion.fechaGuardado, grabacion.horaReserva)
+                    text = listOfNotNull(
+                        grabacion.enfrentamiento,
+                        grabacion.fechaGuardado,
+                        grabacion.horaReserva
+                    )
                         .filter { it.isNotBlank() }
                         .joinToString(" · "),
                     fontSize = 13.sp,

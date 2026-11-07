@@ -38,10 +38,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import me.juliangarcia.sportygoapp.data.Equipo
 
 // Definición de paleta de colores para la interfaz de Equipos
 private val DarkBackground = Color(0xFF0B131D)
@@ -51,32 +56,27 @@ private val PrimaryGreen = Color(0xFF64F089)
 private val TextWhite = Color(0xFFFFFFFF)
 private val TextSecondary = Color(0xFF8C9BAE)
 
-// Colores de acento para los escudos de equipos
-private val ShieldGreen = Color(0xFF64F089)
-private val ShieldTeal = Color(0xFF51D88A)
-private val ShieldAmber = Color(0xFFE58A2B)
-private val ShieldOlive = Color(0xFF7DAE60)
-
-// Modelo de datos inmutable para representar un Equipo
-data class EquipoItem(
-    val id: String,
-    val nombre: String,
-    val jugadores: String,
-    val infoCategoria: String = "Fútbol · Ver estadísticas",
-    val inicial: String,
-    val colorEscudo: Color
+// Colores de acento para los escudos sin imagen (se elige uno según el nombre)
+private val ColoresEscudo = listOf(
+    Color(0xFF64F089),
+    Color(0xFF51D88A),
+    Color(0xFFE58A2B),
+    Color(0xFF7DAE60),
+    Color(0xFF63A0E8),
+    Color(0xFFA78BFA)
 )
 
 @Composable
 fun TeamsScreen(
     modifier: Modifier = Modifier,
     tabSeleccionada: String = "Mis equipos",
-    // Una cuenta nueva no tiene equipos registrados.
-    equipos: List<EquipoItem> = emptyList(),
-    // Callbacks para la futura navegación y eventos
+    /** Equipos de la pestaña actual (una cuenta nueva no tiene equipos). */
+    equipos: List<Equipo> = emptyList(),
+    /** Id del creador -> nombre de usuario (para "Descubrir"). */
+    creadores: Map<String, String> = emptyMap(),
     onBackClick: () -> Unit = {},
     onTabSelected: (String) -> Unit = {},
-    onEquipoClick: (EquipoItem) -> Unit = {},
+    onEquipoClick: (Equipo) -> Unit = {},
     onCrearEquipoClick: () -> Unit = {}
 ) {
     Surface(
@@ -127,40 +127,24 @@ fun TeamsScreen(
                     .background(DarkPillBackground)
                     .padding(4.dp)
             ) {
-                // Pestaña "Mis equipos"
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(50))
-                        .background(if (tabSeleccionada == "Mis equipos") PrimaryGreen else Color.Transparent)
-                        .clickable { onTabSelected("Mis equipos") }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Mis equipos",
-                        fontSize = 14.sp,
-                        fontWeight = if (tabSeleccionada == "Mis equipos") FontWeight.Bold else FontWeight.Medium,
-                        color = if (tabSeleccionada == "Mis equipos") DarkBackground else TextSecondary
-                    )
-                }
-
-                // Pestaña "Descubrir"
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(50))
-                        .background(if (tabSeleccionada == "Descubrir") PrimaryGreen else Color.Transparent)
-                        .clickable { onTabSelected("Descubrir") }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Descubrir",
-                        fontSize = 14.sp,
-                        fontWeight = if (tabSeleccionada == "Descubrir") FontWeight.Bold else FontWeight.Medium,
-                        color = if (tabSeleccionada == "Descubrir") DarkBackground else TextSecondary
-                    )
+                listOf("Mis equipos", "Descubrir").forEach { tab ->
+                    val seleccionada = tabSeleccionada == tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (seleccionada) PrimaryGreen else Color.Transparent)
+                            .clickable { onTabSelected(tab) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = tab,
+                            fontSize = 14.sp,
+                            fontWeight = if (seleccionada) FontWeight.Bold else FontWeight.Medium,
+                            color = if (seleccionada) DarkBackground else TextSecondary
+                        )
+                    }
                 }
             }
 
@@ -170,11 +154,15 @@ fun TeamsScreen(
                 EstadoVacio(
                     icono = Icons.Outlined.Groups,
                     titulo = if (tabSeleccionada == "Mis equipos") {
-                        "Aún no perteneces a ningún equipo"
+                        "Aún no has creado ningún equipo"
                     } else {
                         "No hay equipos para descubrir"
                     },
-                    descripcion = "Crea un equipo o únete a uno para verlo aquí."
+                    descripcion = if (tabSeleccionada == "Mis equipos") {
+                        "Crea un equipo para reservar a su nombre y registrarlo en tus partidos."
+                    } else {
+                        "Aquí verás los equipos que creen otros jugadores."
+                    }
                 )
             }
 
@@ -185,12 +173,14 @@ fun TeamsScreen(
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(
-                    items = equipos,
-                    key = { item -> item.id }
-                ) { equipo ->
+                items(items = equipos, key = { it.id }) { equipo ->
                     EquipoCardItem(
                         equipo = equipo,
+                        subtitulo = if (tabSeleccionada == "Mis equipos") {
+                            "Tu equipo"
+                        } else {
+                            creadores[equipo.creadorId]?.let { "Creado por $it" } ?: "Equipo"
+                        },
                         onClick = { onEquipoClick(equipo) }
                     )
                 }
@@ -204,9 +194,7 @@ fun TeamsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PrimaryGreen
-                ),
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryGreen),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Text(
@@ -225,16 +213,15 @@ fun TeamsScreen(
 // Composable para cada tarjeta de equipo
 @Composable
 private fun EquipoCardItem(
-    equipo: EquipoItem,
+    equipo: Equipo,
+    subtitulo: String,
     onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = DarkCardBackground
-        ),
+        colors = CardDefaults.cardColors(containerColor = DarkCardBackground),
         shape = RoundedCornerShape(16.dp)
     ) {
         Row(
@@ -243,53 +230,58 @@ private fun EquipoCardItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Escudo personalizado del equipo
-            EscudoEquipo(
-                inicial = equipo.inicial,
-                accentColor = equipo.colorEscudo
-            )
+            EscudoDeEquipo(nombre = equipo.nombre, escudoUri = equipo.escudoUri)
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // Información del equipo
             Column {
                 Text(
                     text = equipo.nombre,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextWhite
+                    color = TextWhite,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-
                 Spacer(modifier = Modifier.height(4.dp))
-
                 Text(
-                    text = equipo.jugadores,
+                    text = subtitulo,
                     fontSize = 14.sp,
                     color = TextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = equipo.infoCategoria,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = PrimaryGreen
                 )
             }
         }
     }
 }
 
-// Composable que dibuja el escudo del equipo usando Canvas
+/**
+ * Escudo de un equipo: la imagen elegida por el creador o, si no tiene, un escudo dibujado
+ * con la inicial del nombre. [alto] define el tamaño (el ancho es proporcional).
+ */
 @Composable
-private fun EscudoEquipo(
-    inicial: String,
-    accentColor: Color,
-    modifier: Modifier = Modifier
+fun EscudoDeEquipo(
+    nombre: String,
+    escudoUri: String,
+    modifier: Modifier = Modifier,
+    alto: Dp = 62.dp
 ) {
+    val ancho = alto * (52f / 62f)
+    if (escudoUri.isNotBlank()) {
+        AsyncImage(
+            model = escudoUri,
+            contentDescription = "Escudo de $nombre",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(ancho, alto)
+                .clip(RoundedCornerShape(alto * 0.18f))
+                .background(DarkPillBackground)
+        )
+        return
+    }
+
+    val accentColor = ColoresEscudo[Math.floorMod(nombre.lowercase().hashCode(), ColoresEscudo.size)]
     Box(
-        modifier = modifier.size(52.dp, 62.dp),
+        modifier = modifier.size(ancho, alto),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -314,13 +306,8 @@ private fun EscudoEquipo(
                 close()
             }
 
-            // Fondo oscuro interno del escudo
-            drawPath(
-                path = shieldPath,
-                color = Color(0xFF13222A)
-            )
+            drawPath(path = shieldPath, color = Color(0xFF13222A))
 
-            // Rayas / Franjas verticales del escudo
             clipPath(shieldPath) {
                 val stripeWidth = width * 0.22f
                 drawRect(
@@ -335,7 +322,6 @@ private fun EscudoEquipo(
                 )
             }
 
-            // Borde exterior del escudo
             drawPath(
                 path = shieldPath,
                 color = accentColor,
@@ -344,8 +330,8 @@ private fun EscudoEquipo(
         }
 
         Text(
-            text = inicial,
-            fontSize = 20.sp,
+            text = nombre.trim().take(1).uppercase().ifEmpty { "?" },
+            fontSize = (alto.value * 0.32f).sp,
             fontWeight = FontWeight.Bold,
             color = TextWhite
         )
@@ -355,5 +341,10 @@ private fun EscudoEquipo(
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
 fun TeamsPreview() {
-    TeamsScreen()
+    TeamsScreen(
+        equipos = listOf(
+            Equipo(id = "1", nombre = "Los Halcones"),
+            Equipo(id = "2", nombre = "Real Barrio")
+        )
+    )
 }

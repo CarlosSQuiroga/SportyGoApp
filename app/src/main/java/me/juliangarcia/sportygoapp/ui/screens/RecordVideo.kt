@@ -307,6 +307,18 @@ private fun GrabacionCardItem(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                grabacion.enfrentamiento?.let {
+                    Text(
+                        text = it,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = PrimaryGreen,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
+
                 Text(
                     text = fechaHora,
                     fontSize = 13.sp,

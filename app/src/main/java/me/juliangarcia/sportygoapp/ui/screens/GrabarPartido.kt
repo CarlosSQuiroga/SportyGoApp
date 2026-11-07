@@ -64,6 +64,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.style.TextOverflow
+import me.juliangarcia.sportygoapp.data.Equipo
 import me.juliangarcia.sportygoapp.data.Reserva
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -87,6 +92,12 @@ private val TextSecondary = Color(0xFF8C9BAE)
 @Composable
 fun GrabarPartidoScreen(
     reserva: Reserva,
+    /** Equipos que se pueden elegir como contrincante. */
+    rivales: List<Equipo> = emptyList(),
+    /** Escudo del equipo que reservó (vacío = escudo con la inicial). */
+    escudoEquipo: String = "",
+    rivalSeleccionadoId: String? = null,
+    onRivalSelected: (String?) -> Unit = {},
     onVideoGuardado: (videoUri: String) -> Unit,
     onTerminado: () -> Unit,
     onAhoraNo: () -> Unit,
@@ -117,6 +128,15 @@ fun GrabarPartidoScreen(
         if (permisoCamara) {
             CamaraGrabacion(
                 reserva = reserva,
+                enfrentamiento = {
+                    Enfrentamiento(
+                        reserva = reserva,
+                        escudoEquipo = escudoEquipo,
+                        rivales = rivales,
+                        rivalSeleccionadoId = rivalSeleccionadoId,
+                        onRivalSelected = onRivalSelected
+                    )
+                },
                 onVideoGuardado = onVideoGuardado,
                 onTerminado = onTerminado,
                 onAhoraNo = onAhoraNo
@@ -140,6 +160,8 @@ fun GrabarPartidoScreen(
 @Composable
 private fun CamaraGrabacion(
     reserva: Reserva,
+    /** Equipo que reservó vs. contrincante (con el selector del rival). */
+    enfrentamiento: @Composable () -> Unit,
     onVideoGuardado: (String) -> Unit,
     onTerminado: () -> Unit,
     onAhoraNo: () -> Unit
@@ -267,7 +289,9 @@ private fun CamaraGrabacion(
                 fontSize = 13.sp,
                 color = TextSecondary
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+            enfrentamiento()
+            Spacer(modifier = Modifier.height(10.dp))
             if (grabando) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -331,6 +355,124 @@ private fun CamaraGrabacion(
                             .clip(RoundedCornerShape(50))
                             .background(DarkCard)
                             .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * "Equipo que reservó  vs  Contrincante". El contrincante se puede elegir (o cambiar) antes
+ * o durante la grabación; se guarda junto con el video.
+ */
+@Composable
+private fun Enfrentamiento(
+    reserva: Reserva,
+    escudoEquipo: String,
+    rivales: List<Equipo>,
+    rivalSeleccionadoId: String?,
+    onRivalSelected: (String?) -> Unit
+) {
+    var menuAbierto by remember { mutableStateOf(false) }
+    val rival = rivales.firstOrNull { it.id == rivalSeleccionadoId }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Equipo que reservó
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (reserva.nombreEquipo.isNotBlank()) {
+                EscudoDeEquipo(nombre = reserva.nombreEquipo, escudoUri = escudoEquipo, alto = 32.dp)
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            Text(
+                text = reserva.nombreEquipo.ifBlank { "Sin equipo" },
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (reserva.nombreEquipo.isBlank()) TextSecondary else TextWhite,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Text(
+            text = "vs",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = PrimaryGreen,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        // Contrincante (selector)
+        Box(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0x33FFFFFF))
+                    .clickable { menuAbierto = true }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (rival != null) {
+                    EscudoDeEquipo(nombre = rival.nombre, escudoUri = rival.escudoUri, alto = 26.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                Text(
+                    text = rival?.nombre ?: "Elegir rival",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (rival == null) PrimaryGreen else TextWhite,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = "Elegir equipo contrincante",
+                    tint = TextWhite
+                )
+            }
+
+            DropdownMenu(
+                expanded = menuAbierto,
+                onDismissRequest = { menuAbierto = false }
+            ) {
+                if (rivales.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("No hay otros equipos registrados") },
+                        enabled = false,
+                        onClick = {}
+                    )
+                }
+                if (rival != null) {
+                    DropdownMenuItem(
+                        text = { Text("Sin rival") },
+                        onClick = {
+                            onRivalSelected(null)
+                            menuAbierto = false
+                        }
+                    )
+                }
+                rivales.forEach { equipo ->
+                    DropdownMenuItem(
+                        text = { Text(equipo.nombre) },
+                        leadingIcon = {
+                            EscudoDeEquipo(
+                                nombre = equipo.nombre,
+                                escudoUri = equipo.escudoUri,
+                                alto = 26.dp
+                            )
+                        },
+                        onClick = {
+                            onRivalSelected(equipo.id)
+                            menuAbierto = false
+                        }
                     )
                 }
             }

@@ -66,9 +66,10 @@ fun SearchFieldsScreen(
     // Estado/Valores inmutables pasados por parámetro
     ubicacionTexto: String = "Buscando tu ubicación...",
     busquedaTexto: String = "",
-    deporteSeleccionado: String = "Fútbol",
-    // Canchas registradas por los dueños (opciones para reservar)
+    // Canchas registradas por los dueños (opciones para reservar), las más cercanas primero
     canchas: List<Cancha> = emptyList(),
+    // Id de la cancha -> distancia en metros desde el jugador (vacío = ubicación desconocida)
+    distancias: Map<String, Double> = emptyMap(),
     tabBottomActual: String = "Inicio",
     // Mapa de la ciudad (se inyecta para que la pantalla siga siendo previsualizable)
     mapa: @Composable (Modifier) -> Unit = { m -> Box(m.background(DarkCardBackground)) },
@@ -76,7 +77,6 @@ fun SearchFieldsScreen(
     onNotificacionesClick: () -> Unit = {},
     onUbicacionClick: () -> Unit = {},
     onBusquedaChange: (String) -> Unit = {},
-    onDeporteTabClick: (String) -> Unit = {},
     onMapTargetClick: () -> Unit = {},
     onCanchaClick: (Cancha) -> Unit = {},
     onBottomNavTabClick: (String) -> Unit = {}
@@ -161,7 +161,7 @@ fun SearchFieldsScreen(
                     onValueChange = onBusquedaChange,
                     placeholder = {
                         Text(
-                            text = "Buscar cancha, deporte...",
+                            text = "Buscar cancha o dirección...",
                             color = TextSecondary,
                             fontSize = 15.sp
                         )
@@ -190,47 +190,27 @@ fun SearchFieldsScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Selector de Pestañas de Deportes (Fútbol / Basketball)
-                Row(
+                // Encabezado del mapa: canchas disponibles cerca del jugador
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(50))
                         .background(DarkPillBackground)
                         .padding(4.dp)
                 ) {
-                    // Pestaña "Fútbol"
                     Box(
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth()
                             .clip(RoundedCornerShape(50))
-                            .background(if (deporteSeleccionado == "Fútbol") PrimaryGreen else Color.Transparent)
-                            .clickable { onDeporteTabClick("Fútbol") }
+                            .background(PrimaryGreen)
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Fútbol",
+                            text = "Canchas Disponibles Cerca",
                             fontSize = 14.sp,
-                            fontWeight = if (deporteSeleccionado == "Fútbol") FontWeight.Bold else FontWeight.Medium,
-                            color = if (deporteSeleccionado == "Fútbol") DarkBackground else TextSecondary
-                        )
-                    }
-
-                    // Pestaña "Basketball"
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(50))
-                            .background(if (deporteSeleccionado == "Basketball") PrimaryGreen else Color.Transparent)
-                            .clickable { onDeporteTabClick("Basketball") }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Basketball",
-                            fontSize = 14.sp,
-                            fontWeight = if (deporteSeleccionado == "Basketball") FontWeight.Bold else FontWeight.Medium,
-                            color = if (deporteSeleccionado == "Basketball") DarkBackground else TextSecondary
+                            fontWeight = FontWeight.Bold,
+                            color = DarkBackground
                         )
                     }
                 }
@@ -291,7 +271,11 @@ fun SearchFieldsScreen(
                 }
 
                 canchas.forEach { cancha ->
-                    CanchaCard(cancha = cancha, onClick = { onCanchaClick(cancha) })
+                    CanchaCard(
+                        cancha = cancha,
+                        distanciaMetros = distancias[cancha.id],
+                        onClick = { onCanchaClick(cancha) }
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
@@ -345,7 +329,7 @@ fun SearchFieldsScreen(
 
 // Tarjeta de una cancha registrada
 @Composable
-private fun CanchaCard(cancha: Cancha, onClick: () -> Unit) {
+private fun CanchaCard(cancha: Cancha, distanciaMetros: Double?, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -396,10 +380,24 @@ private fun CanchaCard(cancha: Cancha, onClick: () -> Unit) {
                     fontWeight = FontWeight.Medium,
                     color = PrimaryGreen
                 )
+
+                if (distanciaMetros != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "A ${formatearDistancia(distanciaMetros)} de ti",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                }
             }
         }
     }
 }
+
+/** 850.0 -> "850 m"; 2340.0 -> "2,3 km" */
+private fun formatearDistancia(metros: Double): String =
+    if (metros < 1000) "${metros.toInt()} m"
+    else String.format(java.util.Locale.forLanguageTag("es-CO"), "%.1f km", metros / 1000)
 
 // Composable para cada elemento del Bottom Navigation
 @Composable

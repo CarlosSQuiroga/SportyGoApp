@@ -268,6 +268,14 @@ private fun ReservaResumen(reserva: Reserva) {
                     fontSize = 14.sp,
                     color = TextSecondary
                 )
+                if (reserva.nombreEquipo.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Equipo: ${reserva.nombreEquipo}",
+                        fontSize = 14.sp,
+                        color = PrimaryGreen
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = if (reserva.productos.isEmpty()) formatearPrecio(reserva.precio)

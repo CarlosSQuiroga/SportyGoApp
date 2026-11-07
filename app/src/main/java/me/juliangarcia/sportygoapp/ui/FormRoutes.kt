@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -19,6 +20,7 @@ import me.juliangarcia.sportygoapp.data.Cancha
 import me.juliangarcia.sportygoapp.data.UserRole
 import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.screens.AddFieldScreen
+import me.juliangarcia.sportygoapp.ui.screens.CreateTeamScreen
 import me.juliangarcia.sportygoapp.ui.screens.DetallesCanchaScreen
 import me.juliangarcia.sportygoapp.ui.screens.LoginScreen
 import me.juliangarcia.sportygoapp.ui.screens.ProfileScreen
@@ -26,6 +28,7 @@ import me.juliangarcia.sportygoapp.ui.screens.RegisterFieldScreen
 import me.juliangarcia.sportygoapp.ui.screens.SearchFieldsScreen
 import me.juliangarcia.sportygoapp.ui.screens.SelectAccountScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.osmdroid.util.GeoPoint
 import java.time.LocalDate
 import java.time.LocalTime
@@ -44,6 +47,8 @@ fun RegistroRoute(auth: AuthState) {
     var contrasena by remember { mutableStateOf("") } // la contraseña no se guarda en el estado restaurable
     var fecha by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var enviando by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LoginScreen(
         nombreUsuario = nombre,
@@ -56,7 +61,14 @@ fun RegistroRoute(auth: AuthState) {
         onContrasenaChange = { contrasena = it; error = null },
         onFechaNacimientoChange = { fecha = Validaciones.formatearFechaInput(it); error = null },
         onCrearCuentaClick = {
-            error = auth.registrar(nombre, correo, contrasena, fecha)
+            // Firebase responde por la red: se ignoran toques repetidos mientras tanto.
+            if (!enviando) {
+                enviando = true
+                scope.launch {
+                    error = auth.registrar(nombre, correo, contrasena, fecha)
+                    enviando = false
+                }
+            }
         }
     )
 }
@@ -67,6 +79,8 @@ fun InicioSesionRoute(auth: AuthState) {
     var usuarioCorreo by rememberSaveable { mutableStateOf("") }
     var contrasena by remember { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var enviando by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     SelectAccountScreen(
         usuarioCorreo = usuarioCorreo,
@@ -75,7 +89,13 @@ fun InicioSesionRoute(auth: AuthState) {
         onUsuarioCorreoChange = { usuarioCorreo = it; error = null },
         onContrasenaChange = { contrasena = it; error = null },
         onIniciarSesionClick = {
-            error = auth.iniciarSesion(usuarioCorreo, contrasena)
+            if (!enviando) {
+                enviando = true
+                scope.launch {
+                    error = auth.iniciarSesion(usuarioCorreo, contrasena)
+                    enviando = false
+                }
+            }
         }
     )
 }
@@ -194,7 +214,10 @@ fun AddFieldRoute(
     ) { uri ->
         if (uri != null) {
             val nombreArchivo = "cancha-${auth.usuario?.id ?: "nueva"}"
-            val copia = ArchivosLocales.copiar(context, uri, "canchas", nombreArchivo)
+            // No reemplaza: la imagen guardada se conserva si el dueño no termina el registro.
+            val copia = ArchivosLocales.copiar(
+                context, uri, "canchas", nombreArchivo, reemplazar = false
+            )
             if (copia != null) {
                 imagen = copia
             } else {
@@ -260,7 +283,13 @@ fun AddFieldRoute(
                 longitud = ubicacion.longitud,
                 direccion = ubicacion.direccion
             )
-            if (error == null) onCanchaRegistrada()
+            if (error == null) {
+                // Ya guardada: se borran las imágenes elegidas antes que no se usaron.
+                auth.usuario?.id?.let { id ->
+                    ArchivosLocales.limpiar(context, "canchas", "cancha-$id-", conservar = imagen)
+                }
+                onCanchaRegistrada()
+            }
         }
     )
 }
@@ -274,14 +303,25 @@ fun BuscarCanchasRoute(
     onBottomNavTabClick: (String) -> Unit
 ) {
     var busqueda by rememberSaveable { mutableStateOf("") }
-    var deporte by rememberSaveable { mutableStateOf("Fútbol") }
     val ubicacion = rememberUbicacionUsuario()
 
     // Se leen al entrar a la pantalla (incluye canchas registradas por otros dueños).
     val todas = remember { auth.canchasDisponibles() }
-    val canchas = remember(todas, busqueda) {
+
+    // Distancia (en metros) desde el jugador a cada cancha con ubicación.
+    val distancias = remember(todas, ubicacion.punto) {
+        val yo = ubicacion.punto ?: return@remember emptyMap<String, Double>()
+        todas.mapNotNull { c ->
+            val lat = c.latitud ?: return@mapNotNull null
+            val lon = c.longitud ?: return@mapNotNull null
+            c.id to yo.distanceToAsDouble(GeoPoint(lat, lon))
+        }.toMap()
+    }
+
+    // Canchas disponibles cerca: primero las más cercanas (las sin ubicación al final).
+    val canchas = remember(todas, busqueda, distancias) {
         val q = busqueda.trim()
-        if (q.isEmpty()) {
+        val filtradas = if (q.isEmpty()) {
             todas
         } else {
             todas.filter {
@@ -290,6 +330,7 @@ fun BuscarCanchasRoute(
                     it.direccion.contains(q, ignoreCase = true)
             }
         }
+        filtradas.sortedBy { distancias[it.id] ?: Double.MAX_VALUE }
     }
     // Canchas con ubicación, dibujadas en el mapa (respetan la búsqueda).
     val marcadores = remember(canchas) {
@@ -311,8 +352,8 @@ fun BuscarCanchasRoute(
     SearchFieldsScreen(
         ubicacionTexto = textoUbicacion,
         busquedaTexto = busqueda,
-        deporteSeleccionado = deporte,
         canchas = canchas,
+        distancias = distancias,
         mapa = { m ->
             MapaCiudad(
                 ubicacion = ubicacion.punto,
@@ -325,7 +366,6 @@ fun BuscarCanchasRoute(
         onUbicacionClick = { ubicacion.solicitar() },
         onMapTargetClick = { ubicacion.solicitar() },
         onBusquedaChange = { busqueda = it },
-        onDeporteTabClick = { deporte = it },
         onCanchaClick = onCanchaClick,
         onBottomNavTabClick = onBottomNavTabClick
     )
@@ -337,7 +377,8 @@ fun DetallesCanchaRoute(
     auth: AuthState,
     canchaId: String,
     onBackClick: () -> Unit,
-    onReservaCreada: () -> Unit
+    onReservaCreada: () -> Unit,
+    onCrearEquipoClick: () -> Unit = {}
 ) {
     val cancha = remember(canchaId) { auth.canchaPorId(canchaId) }
     if (cancha == null) {
@@ -371,6 +412,9 @@ fun DetallesCanchaRoute(
     val productos = remember(cancha.id) { auth.productosDeCancha(cancha.id) }
     var carrito by rememberSaveable { mutableStateOf(mapOf<String, Int>()) }
 
+    // Equipo que hace la reserva (opcional, null = sin equipo).
+    var equipoId by rememberSaveable { mutableStateOf<String?>(null) }
+
     DetallesCanchaScreen(
         cancha = cancha,
         dias = etiquetas,
@@ -394,8 +438,15 @@ fun DetallesCanchaRoute(
         onCantidadChange = { id, cantidad ->
             carrito = if (cantidad <= 0) carrito - id else carrito + (id to cantidad)
         },
+        equipos = auth.misEquipos,
+        equipoSeleccionadoId = equipoId,
+        onEquipoSelected = {
+            equipoId = it
+            error = null
+        },
+        onCrearEquipoClick = onCrearEquipoClick,
         onReservarClick = {
-            error = auth.reservar(cancha.id, fecha, hora, carrito)
+            error = auth.reservar(cancha.id, fecha, hora, carrito, equipoId)
             refrescar++
             if (error == null) onReservaCreada()
         }
@@ -423,6 +474,67 @@ private fun horasDeReserva(cancha: Cancha, fecha: LocalDate): List<String> {
             "${m / 60}:${(m % 60).toString().padStart(2, '0')}"
         }
         .toList()
+}
+
+/** Pantalla "Nuevo equipo": nombre + imagen del escudo. Se guarda en la base de datos local. */
+@Composable
+fun CrearEquipoRoute(
+    auth: AuthState,
+    onBackClick: () -> Unit,
+    onEquipoCreado: () -> Unit
+) {
+    val context = LocalContext.current
+    var nombre by rememberSaveable { mutableStateOf("") }
+    var escudo by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    // Prefijo de las imágenes elegidas en este formulario (para borrar las que no se usen).
+    val borrador = rememberSaveable { "escudo-${java.util.UUID.randomUUID()}" }
+
+    val elegirEscudo = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            val copia = ArchivosLocales.copiar(context, uri, "equipos", borrador)
+            if (copia != null) {
+                escudo = copia
+                error = null
+            } else {
+                Toast.makeText(context, "No se pudo cargar la imagen.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun salir() {
+        // Sin guardar: se borran las imágenes elegidas.
+        ArchivosLocales.limpiar(context, "equipos", "$borrador-", conservar = "")
+        onBackClick()
+    }
+    androidx.activity.compose.BackHandler { salir() }
+
+    CreateTeamScreen(
+        nombre = nombre,
+        escudoUri = escudo,
+        errorMensaje = error,
+        onBackClick = { salir() },
+        onNombreChange = {
+            nombre = it.take(30)
+            error = null
+        },
+        onElegirEscudoClick = {
+            elegirEscudo.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        },
+        onQuitarEscudoClick = { escudo = "" },
+        onCrearClick = {
+            error = auth.crearEquipo(nombre, escudo)
+            if (error == null) {
+                ArchivosLocales.limpiar(context, "equipos", "$borrador-", conservar = escudo)
+                Toast.makeText(context, "Equipo creado.", Toast.LENGTH_SHORT).show()
+                onEquipoCreado()
+            }
+        }
+    )
 }
 
 /** Perfil del usuario: permite elegir la foto de perfil desde los archivos del teléfono. */

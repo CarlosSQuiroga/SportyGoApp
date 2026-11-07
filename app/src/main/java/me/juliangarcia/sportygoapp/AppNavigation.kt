@@ -41,6 +41,7 @@ import androidx.navigation.navArgument
 import me.juliangarcia.sportygoapp.data.Reserva
 import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.BuscarCanchasRoute
+import me.juliangarcia.sportygoapp.ui.CrearEquipoRoute
 import me.juliangarcia.sportygoapp.ui.DetallesCanchaRoute
 import me.juliangarcia.sportygoapp.ui.PerfilRoute
 import me.juliangarcia.sportygoapp.ui.screens.ReservaHoyItem
@@ -309,7 +310,9 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                             popUpTo(Routes.SEARCH_FIELDS) { inclusive = false }
                             launchSingleTop = true
                         }
-                    }
+                    },
+                    // Al crear el equipo vuelve al detalle con el equipo ya disponible.
+                    onCrearEquipoClick = { navController.irA(Routes.CREAR_EQUIPO) }
                 )
             }
         }
@@ -421,10 +424,33 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
         composable(route = Routes.TEAMS) {
             RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
                 var tabActual by rememberSaveable { mutableStateOf("Mis equipos") }
+                val miId = auth.usuario?.id
+                // "Descubrir": equipos creados por otros usuarios (se releen al cambiar mis equipos).
+                val otros = remember(auth.misEquipos) {
+                    auth.todosLosEquipos().filter { it.creadorId != miId }
+                }
+                val creadores = remember(otros) {
+                    otros.map { it.creadorId }.distinct().associateWith { id ->
+                        auth.nombreDeUsuario(id).orEmpty()
+                    }.filterValues { it.isNotBlank() }
+                }
                 TeamsScreen(
                     tabSeleccionada = tabActual,
+                    equipos = if (tabActual == "Mis equipos") auth.misEquipos else otros,
+                    creadores = creadores,
                     onBackClick = { navController.popBackStack() },
-                    onTabSelected = { tabActual = it }
+                    onTabSelected = { tabActual = it },
+                    onCrearEquipoClick = { navController.irA(Routes.CREAR_EQUIPO) }
+                )
+            }
+        }
+
+        composable(route = Routes.CREAR_EQUIPO) {
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                CrearEquipoRoute(
+                    auth = auth,
+                    onBackClick = { navController.popBackStack() },
+                    onEquipoCreado = { navController.popBackStack() }
                 )
             }
         }
@@ -454,9 +480,17 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                 if (reserva == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
+                    // Equipo contrincante elegido antes o durante la grabación.
+                    var rivalId by rememberSaveable { mutableStateOf<String?>(null) }
+                    val equipos = remember { auth.todosLosEquipos() }
                     GrabarPartidoScreen(
                         reserva = reserva,
-                        onVideoGuardado = { uri -> auth.guardarGrabacion(reserva, uri) },
+                        // El contrincante no puede ser el mismo equipo que reservó.
+                        rivales = equipos.filter { it.id != reserva.equipoId },
+                        escudoEquipo = equipos.firstOrNull { it.id == reserva.equipoId }?.escudoUri.orEmpty(),
+                        rivalSeleccionadoId = rivalId,
+                        onRivalSelected = { rivalId = it },
+                        onVideoGuardado = { uri -> auth.guardarGrabacion(reserva, uri, rivalId) },
                         onTerminado = {
                             navController.navigate(Routes.RECORD_VIDEO) {
                                 popUpTo(Routes.GRABAR_PARTIDO_PATRON) { inclusive = true }

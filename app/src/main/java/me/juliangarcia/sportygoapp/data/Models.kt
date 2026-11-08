@@ -107,8 +107,13 @@ data class Grabacion(
     val nombreEquipo: String = "",
     /** Equipo contrincante elegido al grabar (vacío = sin rival registrado). */
     val rivalId: String = "",
-    val nombreRival: String = ""
+    val nombreRival: String = "",
+    /** Nombre que le puso el usuario (vacío = se muestra el nombre de la cancha). */
+    val nombre: String = ""
 ) {
+    /** Nombre que se muestra en la lista y al compartir. */
+    val titulo: String get() = nombre.ifBlank { nombreCancha.ifBlank { "Partido" } }
+
     /** "Los Halcones vs Real Barrio", o null si la grabación no tiene equipos. */
     val enfrentamiento: String?
         get() = when {

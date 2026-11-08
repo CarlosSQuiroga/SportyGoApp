@@ -54,8 +54,11 @@ object Routes {
     // Ver una grabación guardada
     const val REPRODUCIR = "reproducir"
     const val ARG_GRABACION_ID = "grabacionId"
-    const val REPRODUCIR_PATRON = "$REPRODUCIR/{$ARG_GRABACION_ID}"
-    fun reproducir(grabacionId: String) = "$REPRODUCIR/$grabacionId"
+    /** momento=true abre directamente la selección del momento clave para compartir. */
+    const val ARG_MOMENTO = "momento"
+    const val REPRODUCIR_PATRON = "$REPRODUCIR/{$ARG_GRABACION_ID}?$ARG_MOMENTO={$ARG_MOMENTO}"
+    fun reproducir(grabacionId: String, momento: Boolean = false) =
+        "$REPRODUCIR/$grabacionId?$ARG_MOMENTO=$momento"
 
     // Chat jugador-dueño de una cancha
     const val CHAT = "chat"

@@ -259,6 +259,11 @@ class AuthRepository(private val nube: NubeDatos = NubeDatos) {
     /** Los videos se quedan en el teléfono que grabó; en la nube solo se guarda el registro. */
     fun guardarGrabacion(grabacion: Grabacion) = nube.grabaciones.guardar(grabacion.id, grabacion)
 
+    fun renombrarGrabacion(id: String, nombre: String) =
+        nube.grabaciones.actualizar(id, mapOf("nombre" to nombre)) { it.copy(nombre = nombre) }
+
+    fun eliminarGrabacion(id: String) = nube.grabaciones.borrar(id)
+
     fun reservasSinGrabar(): Set<String> =
         nube.reservas.todos.filter { it.sinGrabar }.map { it.id }.toSet()
 

@@ -382,7 +382,8 @@ object NubeDatos {
         equipoId = d.texto("equipoId"),
         nombreEquipo = d.texto("nombreEquipo"),
         rivalId = d.texto("rivalId"),
-        nombreRival = d.texto("nombreRival")
+        nombreRival = d.texto("nombreRival"),
+        nombre = d.texto("nombre")
     )
 
     private fun escribirGrabacion(g: Grabacion) = mapOf(
@@ -395,7 +396,8 @@ object NubeDatos {
         "equipoId" to g.equipoId,
         "nombreEquipo" to g.nombreEquipo,
         "rivalId" to g.rivalId,
-        "nombreRival" to g.nombreRival
+        "nombreRival" to g.nombreRival,
+        "nombre" to g.nombre
     )
 
     private fun leerNotificacion(d: DocumentSnapshot) = Notificacion(

@@ -33,7 +33,6 @@ import me.juliangarcia.sportygoapp.data.Notificacion
 import me.juliangarcia.sportygoapp.data.TipoNotificacion
 import me.juliangarcia.sportygoapp.ui.screens.GrabarPartidoScreen
 import me.juliangarcia.sportygoapp.ui.screens.NotificacionItem
-import me.juliangarcia.sportygoapp.ui.screens.ReproducirGrabacionScreen
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -44,6 +43,8 @@ import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.BuscarCanchasRoute
 import me.juliangarcia.sportygoapp.ui.ChatRoute
 import me.juliangarcia.sportygoapp.ui.ConfiguracionRoute
+import me.juliangarcia.sportygoapp.ui.GrabacionesRoute
+import me.juliangarcia.sportygoapp.ui.ReproducirGrabacionRoute
 import me.juliangarcia.sportygoapp.ui.ConversacionesRoute
 import me.juliangarcia.sportygoapp.ui.CrearEquipoRoute
 import me.juliangarcia.sportygoapp.ui.DetallesCanchaRoute
@@ -69,7 +70,6 @@ import me.juliangarcia.sportygoapp.ui.screens.MyReserveScreen
 import me.juliangarcia.sportygoapp.ui.screens.NotificationsScreen
 import me.juliangarcia.sportygoapp.ui.screens.OpenScreen
 import me.juliangarcia.sportygoapp.ui.screens.OwnersPanelScreen
-import me.juliangarcia.sportygoapp.ui.screens.RecordVideoScreen
 import me.juliangarcia.sportygoapp.ui.screens.SelectProfileScreen
 import me.juliangarcia.sportygoapp.ui.screens.ShopScreen
 import me.juliangarcia.sportygoapp.ui.screens.TeamsScreen
@@ -501,13 +501,13 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
 
         composable(route = Routes.RECORD_VIDEO) {
             RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
-                var tabActual by rememberSaveable { mutableStateOf("Mis partidos") }
-                RecordVideoScreen(
-                    tabSeleccionada = tabActual,
-                    grabaciones = auth.misGrabaciones,
+                GrabacionesRoute(
+                    auth = auth,
                     onBackClick = { navController.popBackStack() },
-                    onTabSelected = { tabActual = it },
-                    onGrabacionClick = { g -> navController.irA(Routes.reproducir(g.id)) },
+                    onVerGrabacion = { g -> navController.irA(Routes.reproducir(g.id)) },
+                    onMomentoClave = { g ->
+                        navController.irA(Routes.reproducir(g.id, momento = true))
+                    },
                     onBottomNavTabClick = { tab -> navController.irATab(tab, auth) }
                 )
             }
@@ -553,19 +553,21 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
 
         composable(
             route = Routes.REPRODUCIR_PATRON,
-            arguments = listOf(navArgument(Routes.ARG_GRABACION_ID) { type = NavType.StringType })
+            arguments = listOf(
+                navArgument(Routes.ARG_GRABACION_ID) { type = NavType.StringType },
+                navArgument(Routes.ARG_MOMENTO) {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }
+            )
         ) { entry ->
             RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
-                val id = entry.arguments?.getString(Routes.ARG_GRABACION_ID).orEmpty()
-                val grabacion = remember(id) { auth.grabacionPorId(id) }
-                if (grabacion == null) {
-                    LaunchedEffect(Unit) { navController.popBackStack() }
-                } else {
-                    ReproducirGrabacionScreen(
-                        grabacion = grabacion,
-                        onBackClick = { navController.popBackStack() }
-                    )
-                }
+                ReproducirGrabacionRoute(
+                    auth = auth,
+                    grabacionId = entry.arguments?.getString(Routes.ARG_GRABACION_ID).orEmpty(),
+                    abrirEnMomentoClave = entry.arguments?.getBoolean(Routes.ARG_MOMENTO) ?: false,
+                    onBackClick = { navController.popBackStack() }
+                )
             }
         }
 

@@ -19,7 +19,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
@@ -65,6 +76,11 @@ fun RecordVideoScreen(
     onBackClick: () -> Unit = {},
     onTabSelected: (String) -> Unit = {},
     onGrabacionClick: (Grabacion) -> Unit = {},
+    // Menú de cada video: compartir completo, compartir un momento clave, renombrar, eliminar
+    onCompartirClick: (Grabacion) -> Unit = {},
+    onMomentoClaveClick: (Grabacion) -> Unit = {},
+    onRenombrarClick: (Grabacion) -> Unit = {},
+    onEliminarClick: (Grabacion) -> Unit = {},
     onBottomNavTabClick: (String) -> Unit = {}
 ) {
     Surface(
@@ -182,7 +198,11 @@ fun RecordVideoScreen(
                     ) { grabacion ->
                         GrabacionCardItem(
                             grabacion = grabacion,
-                            onClick = { onGrabacionClick(grabacion) }
+                            onClick = { onGrabacionClick(grabacion) },
+                            onCompartirClick = { onCompartirClick(grabacion) },
+                            onMomentoClaveClick = { onMomentoClaveClick(grabacion) },
+                            onRenombrarClick = { onRenombrarClick(grabacion) },
+                            onEliminarClick = { onEliminarClick(grabacion) }
                         )
                     }
 
@@ -245,9 +265,14 @@ fun RecordVideoScreen(
 @Composable
 private fun GrabacionCardItem(
     grabacion: Grabacion,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onCompartirClick: () -> Unit,
+    onMomentoClaveClick: () -> Unit,
+    onRenombrarClick: () -> Unit,
+    onEliminarClick: () -> Unit
 ) {
-    val titulo = grabacion.nombreCancha.ifBlank { "Partido" }
+    val titulo = grabacion.titulo
+    var menuAbierto by remember { mutableStateOf(false) }
     val fechaHora = listOf(grabacion.fechaGuardado, grabacion.horaReserva)
         .filter { it.isNotBlank() }
         .joinToString(" · ")
@@ -302,8 +327,15 @@ private fun GrabacionCardItem(
                     text = titulo,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextWhite
+                    color = TextWhite,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
+
+                // Si el usuario lo renombró, se sigue viendo en qué cancha fue.
+                if (grabacion.nombre.isNotBlank() && grabacion.nombreCancha.isNotBlank()) {
+                    Text(text = grabacion.nombreCancha, fontSize = 13.sp, color = TextSecondary)
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -348,8 +380,55 @@ private fun GrabacionCardItem(
                     )
                 }
             }
+
+            // Menú de opciones del video
+            Box {
+                IconButton(onClick = { menuAbierto = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = "Opciones del video",
+                        tint = TextSecondary
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuAbierto,
+                    onDismissRequest = { menuAbierto = false },
+                    containerColor = DarkPillBackground
+                ) {
+                    OpcionMenu("Compartir partido completo", Icons.Outlined.Share) {
+                        menuAbierto = false
+                        onCompartirClick()
+                    }
+                    OpcionMenu("Compartir momento clave", Icons.Outlined.ContentCut) {
+                        menuAbierto = false
+                        onMomentoClaveClick()
+                    }
+                    OpcionMenu("Renombrar", Icons.Outlined.Edit) {
+                        menuAbierto = false
+                        onRenombrarClick()
+                    }
+                    OpcionMenu("Eliminar", Icons.Outlined.Delete, color = Color(0xFFFF6B6B)) {
+                        menuAbierto = false
+                        onEliminarClick()
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun OpcionMenu(
+    texto: String,
+    icono: ImageVector,
+    color: Color = TextWhite,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = { Text(texto, color = color, fontSize = 14.sp) },
+        leadingIcon = { Icon(icono, contentDescription = null, tint = color) },
+        onClick = onClick
+    )
 }
 
 // Composable auxiliar para la barra de navegación inferior

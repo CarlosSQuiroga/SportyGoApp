@@ -9,10 +9,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import me.juliangarcia.sportygoapp.data.NubeDatos
 
-/**
- * Android borra las alarmas al reiniciar: las vuelve a programar con las reservas del
- * usuario que tiene la sesión abierta en este teléfono.
- */
 class ArranqueReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {

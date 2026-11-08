@@ -25,17 +25,11 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/**
- * Notificaciones del sistema y alarmas de la app:
- * - muestra en el teléfono las notificaciones de la bandeja del usuario;
- * - programa el aviso que llega a la hora de cada reserva para que el anfitrión grabe el partido.
- */
 class Avisos(context: Context) {
 
     private val context = context.applicationContext
     private val alarmas = this.context.getSystemService(AlarmManager::class.java)
 
-    /** Crea los canales (Android 8+ los exige; crearlos varias veces no tiene efecto). */
     fun crearCanales() {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
@@ -54,12 +48,10 @@ class Avisos(context: Context) {
         )
     }
 
-    /** Quita del teléfono la notificación con ese id (sigue en la bandeja de la app). */
     fun quitar(notificacionId: String) {
         NotificationManagerCompat.from(context).cancel(notificacionId.hashCode())
     }
 
-    /** Muestra [n] en el teléfono. Si no hay permiso, solo queda en la bandeja de la app. */
     fun mostrar(n: Notificacion) {
         if (!puedeNotificar()) return
         val esGrabacion = n.tipo == TipoNotificacion.GRABAR_PARTIDO

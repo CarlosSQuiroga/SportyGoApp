@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Carpetas que la app comparte temporalmente con la cámara del sistema (fotos de productos). -->
+<!--
+    Carpetas que la app comparte temporalmente con otras apps:
+    - fotos: con la cámara del sistema (fotos de productos).
+    - grabaciones: videos de partidos completos (al compartirlos).
+    - clips: momentos clave recortados de un partido (al compartirlos).
+-->
 <paths>
     <cache-path
         name="fotos"
         path="fotos/" />
+    <files-path
+        name="grabaciones"
+        path="grabaciones/" />
+    <cache-path
+        name="clips"
+        path="clips/" />
 </paths>

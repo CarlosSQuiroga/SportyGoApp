@@ -791,6 +791,27 @@ class AuthState(
         return null
     }
 
+    /**
+     * Cambia el nombre de una grabación propia (vacío = vuelve a mostrar el nombre de la cancha).
+     * Devuelve un mensaje de error, o null si se guardó.
+     */
+    fun renombrarGrabacion(id: String, nombre: String): String? {
+        val g = grabacionPorId(id) ?: return "Esa grabación ya no existe."
+        val limpio = nombre.trim().replace(Regex("\\s+"), " ")
+        if (limpio.length > 60) return "El nombre es muy largo (máximo 60 caracteres)."
+        repo.renombrarGrabacion(g.id, limpio)
+        misGrabaciones = repo.grabacionesDeUsuario(g.usuarioId)
+        return null
+    }
+
+    /** Borra la grabación de la lista y su video de este teléfono. */
+    fun eliminarGrabacion(id: String) {
+        val g = grabacionPorId(id) ?: return
+        repo.eliminarGrabacion(g.id)
+        archivoDeVideo(g)?.delete()
+        misGrabaciones = repo.grabacionesDeUsuario(g.usuarioId)
+    }
+
     fun grabacionPorId(id: String): Grabacion? =
         repo.grabacionPorId(id)?.takeIf { it.usuarioId == usuario?.id }
 
@@ -817,5 +838,14 @@ class AuthState(
 
     companion object {
         val FORMATO_FECHA: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+
+        /**
+         * Archivo del video de [g] en este teléfono, o null si no está aquí (los videos se
+         * quedan en el teléfono que grabó; en la nube solo está el registro).
+         */
+        fun archivoDeVideo(g: Grabacion): java.io.File? {
+            val ruta = android.net.Uri.parse(g.videoUri).path ?: return null
+            return java.io.File(ruta).takeIf { it.isFile }
+        }
     }
 }

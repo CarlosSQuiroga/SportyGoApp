@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "792162768420",
+    "project_id": "sportygoapp",
+    "storage_bucket": "sportygoapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:792162768420:android:54ed1556fecd8936b0aab1",
+        "android_client_info": {
+          "package_name": "me.juliangarcia.sportygoapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBcVenzRTXM3G1jwsaZMD1195TeVxrBVAI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

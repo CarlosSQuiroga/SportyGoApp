@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import me.juliangarcia.sportygoapp.data.ArchivosLocales
 import me.juliangarcia.sportygoapp.data.AuthState
 import me.juliangarcia.sportygoapp.data.Cancha
+import me.juliangarcia.sportygoapp.data.Mensaje
 import me.juliangarcia.sportygoapp.data.UserRole
 import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.screens.AddFieldScreen
@@ -31,7 +32,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.util.GeoPoint
 import java.time.LocalDate
-import java.time.LocalTime
 
 /*
  * Las pantallas del proyecto son "stateless" (reciben valores y callbacks).
@@ -151,6 +151,7 @@ fun RegistrarUbicacionRoute(
             MapaSeleccion(
                 irA = destino,
                 recentrar = recentrar,
+                ubicacionUsuario = ubicacionUsuario.punto,
                 onCentroChange = { centro = it },
                 onToque = { tocado = true },
                 modifier = m
@@ -189,6 +190,7 @@ fun AddFieldRoute(
     onCanchaRegistrada: () -> Unit
 ) {
     val context = LocalContext.current
+    val ubicacionUsuario = rememberUbicacionUsuario()
     val marcador = remember(ubicacion) {
         listOf(
             MarcadorCancha(
@@ -264,10 +266,11 @@ fun AddFieldRoute(
         onHoraCierreClick = { elegirHora(cierre) { cierre = it } },
         direccion = ubicacion.direccion,
         mapa = { m -> MapaCiudad(
-                ubicacion = null,
+                ubicacion = ubicacionUsuario.punto,
                 canchas = marcador,
                 zoom = 16.0,
                 interactivo = false,
+                centrarEnUsuario = false,
                 modifier = m
             ) },
         onCambiarUbicacionClick = onCambiarUbicacionClick,
@@ -378,7 +381,9 @@ fun DetallesCanchaRoute(
     canchaId: String,
     onBackClick: () -> Unit,
     onReservaCreada: () -> Unit,
-    onCrearEquipoClick: () -> Unit = {}
+    onCrearEquipoClick: () -> Unit = {},
+    /** Abre el chat con el dueño de la cancha. */
+    onChatClick: () -> Unit = {}
 ) {
     val cancha = remember(canchaId) { auth.canchaPorId(canchaId) }
     if (cancha == null) {
@@ -405,8 +410,15 @@ fun DetallesCanchaRoute(
     var refrescar by remember { mutableStateOf(0) }
 
     val fecha = fechas[diaIndice]
-    val horas = remember(cancha, fecha) { horasDeReserva(cancha, fecha) }
+    val horas = remember(cancha, fecha) { Validaciones.horasDeReserva(cancha, fecha) }
     val ocupadas = remember(cancha.id, fecha, refrescar) { auth.horasOcupadas(cancha.id, fecha) }
+
+    // Cuántas horas seguidas reserva (desde la hora elegida) y el máximo posible.
+    var duracion by rememberSaveable { mutableStateOf(1) }
+    val maxDuracion = maxHorasSeguidas(hora, horas, ocupadas)
+    LaunchedEffect(maxDuracion) {
+        if (maxDuracion > 0 && duracion > maxDuracion) duracion = maxDuracion
+    }
 
     // Productos del kiosco y cantidades elegidas (carrito).
     val productos = remember(cancha.id) { auth.productosDeCancha(cancha.id) }
@@ -427,12 +439,19 @@ fun DetallesCanchaRoute(
         onDiaSelected = {
             diaIndice = it
             hora = null
+            duracion = 1
             error = null
         },
         onHoraSelected = {
             hora = it
             error = null
         },
+        mensajesSinLeer = auth.usuario?.id
+            ?.let { auth.noLeidosEnChat(Mensaje.idChat(cancha.id, it)) } ?: 0,
+        onChatClick = onChatClick,
+        duracionHoras = duracion,
+        maxDuracionHoras = maxDuracion,
+        onDuracionChange = { duracion = it.coerceIn(1, maxOf(1, maxDuracion)); error = null },
         productos = productos,
         cantidades = carrito,
         onCantidadChange = { id, cantidad ->
@@ -446,7 +465,7 @@ fun DetallesCanchaRoute(
         },
         onCrearEquipoClick = onCrearEquipoClick,
         onReservarClick = {
-            error = auth.reservar(cancha.id, fecha, hora, carrito, equipoId)
+            error = auth.reservar(cancha.id, fecha, hora, carrito, equipoId, duracion)
             refrescar++
             if (error == null) onReservaCreada()
         }
@@ -454,26 +473,20 @@ fun DetallesCanchaRoute(
 }
 
 /**
- * Horas de inicio (cada reserva dura 1 hora) entre la apertura y el cierre de la cancha.
- * Si el cierre es menor que la apertura, la cancha cierra después de medianoche.
- * Para hoy, solo se muestran las horas que aún no han pasado.
+ * Cuántas horas seguidas se pueden reservar desde [inicio]: avanza por [horas] (ordenadas)
+ * mientras cada una sea la siguiente hora y esté libre. 0 si [inicio] no está disponible.
  */
-private fun horasDeReserva(cancha: Cancha, fecha: LocalDate): List<String> {
-    val apertura = Validaciones.minutosDelDia(cancha.horaApertura) ?: return emptyList()
-    var cierre = Validaciones.minutosDelDia(cancha.horaCierre) ?: return emptyList()
-    if (cierre <= apertura) cierre += 24 * 60
-
-    val ahora = LocalTime.now().let { it.hour * 60 + it.minute }
-    val esHoy = fecha == LocalDate.now()
-
-    return generateSequence(apertura) { it + 60 }
-        .takeWhile { it + 60 <= cierre }
-        .filter { !esHoy || it > ahora }
-        .map { total ->
-            val m = total % (24 * 60)
-            "${m / 60}:${(m % 60).toString().padStart(2, '0')}"
-        }
-        .toList()
+private fun maxHorasSeguidas(inicio: String?, horas: List<String>, ocupadas: Set<String>): Int {
+    if (inicio == null) return 0
+    val desde = horas.indexOf(inicio)
+    if (desde < 0) return 0
+    var cantidad = 0
+    for (i in desde until horas.size) {
+        if (horas[i] in ocupadas) break
+        if (i > desde && horas[i] != Validaciones.sumarHoras(horas[i - 1], 1)) break
+        cantidad++
+    }
+    return cantidad
 }
 
 /** Pantalla "Nuevo equipo": nombre + imagen del escudo. Se guarda en la base de datos local. */

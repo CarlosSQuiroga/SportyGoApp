@@ -9,6 +9,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
@@ -41,6 +42,8 @@ import androidx.navigation.navArgument
 import me.juliangarcia.sportygoapp.data.Reserva
 import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.BuscarCanchasRoute
+import me.juliangarcia.sportygoapp.ui.ChatRoute
+import me.juliangarcia.sportygoapp.ui.ConversacionesRoute
 import me.juliangarcia.sportygoapp.ui.CrearEquipoRoute
 import me.juliangarcia.sportygoapp.ui.DetallesCanchaRoute
 import me.juliangarcia.sportygoapp.ui.PerfilRoute
@@ -239,6 +242,8 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                     filtroIngresosTab = filtroIngresos,
                     onFiltroIngresosTabClick = { filtroIngresos = it },
                     onInventarioClick = { navController.irA(Routes.INVENTARY_OWNER) },
+                    mensajesSinLeer = auth.totalMensajesSinLeer(),
+                    onMensajesClick = { navController.irA(Routes.CHATS) },
                     onBottomNavTabClick = { tab -> navController.irATab(tab, auth) }
                 )
             }
@@ -312,7 +317,43 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                         }
                     },
                     // Al crear el equipo vuelve al detalle con el equipo ya disponible.
-                    onCrearEquipoClick = { navController.irA(Routes.CREAR_EQUIPO) }
+                    onCrearEquipoClick = { navController.irA(Routes.CREAR_EQUIPO) },
+                    onChatClick = {
+                        val canchaId = entry.arguments?.getString(Routes.ARG_CANCHA_ID).orEmpty()
+                        auth.usuario?.id?.let { yo -> navController.irA(Routes.chat(canchaId, yo)) }
+                    }
+                )
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // CHAT JUGADOR - DUEÑO
+        // ---------------------------------------------------------------
+        composable(
+            route = Routes.CHAT_PATRON,
+            arguments = listOf(
+                navArgument(Routes.ARG_CANCHA_ID) { type = NavType.StringType },
+                navArgument(Routes.ARG_JUGADOR_ID) { type = NavType.StringType }
+            )
+        ) { entry ->
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                ChatRoute(
+                    auth = auth,
+                    canchaId = entry.arguments?.getString(Routes.ARG_CANCHA_ID).orEmpty(),
+                    jugadorId = entry.arguments?.getString(Routes.ARG_JUGADOR_ID).orEmpty(),
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+        }
+
+        composable(route = Routes.CHATS) {
+            RutaProtegida(Acceso.DUENIO_CON_CANCHA, auth, navController) {
+                ConversacionesRoute(
+                    auth = auth,
+                    onConversacionClick = { canchaId, jugadorId ->
+                        navController.irA(Routes.chat(canchaId, jugadorId))
+                    },
+                    onBackClick = { navController.popBackStack() }
                 )
             }
         }
@@ -626,6 +667,7 @@ private fun Notificacion.aItem(): NotificacionItem {
         TipoNotificacion.RESERVA_RECIBIDA -> Icons.Outlined.CalendarToday to Color(0xFFE5B83B)
         TipoNotificacion.PEDIDO_RECIBIDO -> Icons.Outlined.Storefront to Color(0xFFA78BFA)
         TipoNotificacion.GRABAR_PARTIDO -> Icons.Outlined.Videocam to Color(0xFFE07048)
+        TipoNotificacion.MENSAJE_NUEVO -> Icons.Outlined.ChatBubbleOutline to Color(0xFF63A0E8)
     }
     return NotificacionItem(
         id = id,
@@ -749,11 +791,9 @@ private fun resumenDuenio(reservas: List<Reserva>): ResumenDuenio {
         .filter { fechaDe(it) == hoy }
         .sortedBy { Validaciones.minutosDelDia(it.hora) ?: 0 }
         .map { r ->
-            val inicio = Validaciones.minutosDelDia(r.hora) ?: 0
-            val fin = (inicio + 60) % (24 * 60)
             ReservaHoyItem(
-                "${r.hora} – ${fin / 60}:${(fin % 60).toString().padStart(2, '0')}",
-                "Confirmada"
+                "${r.hora} – ${r.horaFin}",
+                if (r.duracionHoras == 1) "Confirmada" else "Confirmada · ${r.duracionHoras} h"
             )
         }
 

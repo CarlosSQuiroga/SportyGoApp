@@ -285,7 +285,7 @@ private fun CamaraGrabacion(
                 color = TextWhite
             )
             Text(
-                text = "${reserva.fecha} · ${reserva.hora}",
+                text = "${reserva.fecha} · ${reserva.hora} – ${reserva.horaFin}",
                 fontSize = 13.sp,
                 color = TextSecondary
             )

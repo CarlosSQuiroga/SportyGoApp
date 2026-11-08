@@ -67,6 +67,42 @@ object Validaciones {
         return h * 60 + m
     }
 
+    /** Minutos desde medianoche -> "H:mm" (pasada la medianoche vuelve a empezar en 0:00). */
+    fun textoHora(minutos: Int): String {
+        val m = ((minutos % (24 * 60)) + 24 * 60) % (24 * 60)
+        return "${m / 60}:${(m % 60).toString().padStart(2, '0')}"
+    }
+
+    /** [hora] + [horas] horas, formato "H:mm" ("" si [hora] no es válida). */
+    fun sumarHoras(hora: String, horas: Int): String =
+        minutosDelDia(hora)?.let { textoHora(it + horas * 60) } ?: ""
+
+    /**
+     * Horas de inicio que se pueden reservar en [cancha] el día [fecha]: cada una dura 1 hora,
+     * entre la apertura y el cierre. Si el cierre es menor que la apertura, la cancha cierra
+     * después de medianoche. Para hoy, solo las horas que aún no han pasado.
+     */
+    fun horasDeReserva(cancha: Cancha, fecha: LocalDate): List<String> {
+        val apertura = minutosDelDia(cancha.horaApertura) ?: return emptyList()
+        var cierre = minutosDelDia(cancha.horaCierre) ?: return emptyList()
+        if (cierre <= apertura) cierre += 24 * 60
+
+        val ahora = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+        val esHoy = fecha == LocalDate.now()
+
+        return generateSequence(apertura) { it + 60 }
+            .takeWhile { it + 60 <= cierre }
+            .filter { !esHoy || it > ahora }
+            .map { textoHora(it) }
+            .toList()
+    }
+
+    /** Horas de inicio de [cantidad] horas seguidas desde [hora]: "9:00" x2 -> ["9:00", "10:00"]. */
+    fun horasSeguidas(hora: String, cantidad: Int): List<String> {
+        val inicio = minutosDelDia(hora) ?: return listOf(hora)
+        return (0 until cantidad.coerceAtLeast(1)).map { textoHora(inicio + it * 60) }
+    }
+
     fun cancha(
         nombre: String,
         capacidad: String,

@@ -141,7 +141,9 @@ enum class EstadoReserva { PENDIENTE_PAGO, CONFIRMADA, RECHAZADA }
 
 enum class TipoNotificacion {
     CUENTA_CREADA, VINCULAR_NEQUI, PAGO_PENDIENTE, PAGO_RECHAZADO,
-    RESERVA_HECHA, RESERVA_RECIBIDA, PEDIDO_RECIBIDO, GRABAR_PARTIDO
+    RESERVA_HECHA, RESERVA_RECIBIDA, PEDIDO_RECIBIDO, GRABAR_PARTIDO,
+    /** Mensaje nuevo en el chat (solo sale en el teléfono, no se guarda en la bandeja). */
+    MENSAJE_NUEVO
 }
 
 /**
@@ -169,9 +171,11 @@ data class Reserva(
     val nombreCancha: String = "",
     /** Fecha de la reserva, formato "dd/MM/yyyy". */
     val fecha: String = "",
-    /** Hora de inicio, formato "H:mm". Cada reserva dura 1 hora. */
+    /** Hora de inicio, formato "H:mm". */
     val hora: String = "",
-    /** Precio de la cancha (1 hora). */
+    /** Horas seguidas reservadas desde [hora] (las reservas antiguas duran 1 hora). */
+    val duracionHoras: Int = 1,
+    /** Precio de la cancha por todas las horas reservadas. */
     val precio: Int = 0,
     /** Productos comprados para reclamar en el kiosco de la cancha (vacío = no compró). */
     val productos: List<ItemCompra> = emptyList(),
@@ -190,4 +194,48 @@ data class Reserva(
 ) {
     val totalProductos: Int get() = productos.sumOf { it.subtotal }
     val total: Int get() = precio + totalProductos
+
+    /** Horas de inicio que ocupa la reserva ("9:00", "10:00"...). */
+    val horasOcupadas: List<String> get() = Validaciones.horasSeguidas(hora, duracionHoras)
+
+    /** Hora en que termina, formato "H:mm" (ej. "11:00"). */
+    val horaFin: String get() = Validaciones.sumarHoras(hora, duracionHoras)
+
+    /** Ej. "9:00 – 11:00 (2 horas)". */
+    val rangoHoras: String
+        get() = "$hora – $horaFin (${if (duracionHoras == 1) "1 hora" else "$duracionHoras horas"})"
 }
+
+/**
+ * Mensaje del chat entre un jugador y el dueño de una cancha. Cada conversación ([chatId])
+ * es la de un jugador con una cancha: "<canchaId>_<jugadorId>".
+ */
+data class Mensaje(
+    val id: String = "",
+    val chatId: String = "",
+    val canchaId: String = "",
+    val jugadorId: String = "",
+    val duenioId: String = "",
+    /** Quién lo escribió (el jugador o el dueño). */
+    val autorId: String = "",
+    val texto: String = "",
+    /** Momento de envío (epoch millis). */
+    val enviadoEn: Long = 0L,
+    /** true cuando el destinatario ya lo vio. */
+    val leido: Boolean = false
+) {
+    companion object {
+        fun idChat(canchaId: String, jugadorId: String) = "${canchaId}_$jugadorId"
+    }
+}
+
+/** Resumen de una conversación para la lista de chats. */
+data class Conversacion(
+    val chatId: String,
+    val canchaId: String,
+    val jugadorId: String,
+    val duenioId: String,
+    val ultimo: Mensaje,
+    /** Mensajes recibidos que el usuario en sesión aún no ha leído. */
+    val noLeidos: Int
+)

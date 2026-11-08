@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Schedule
@@ -46,6 +47,7 @@ import androidx.compose.foundation.horizontalScroll
 import me.juliangarcia.sportygoapp.data.Cancha
 import me.juliangarcia.sportygoapp.data.Equipo
 import me.juliangarcia.sportygoapp.data.Producto
+import me.juliangarcia.sportygoapp.data.Validaciones
 
 // Definición de paleta de colores para la interfaz
 private val DarkBackground = Color(0xFF0B131D)
@@ -70,6 +72,14 @@ fun DetallesCanchaScreen(
     /** Horas ya reservadas el día seleccionado. */
     horasOcupadas: Set<String> = emptySet(),
     horaSeleccionada: String? = null,
+    /** Horas seguidas a reservar desde [horaSeleccionada]. */
+    duracionHoras: Int = 1,
+    /** Máximo de horas seguidas libres desde [horaSeleccionada] (0 = sin hora elegida). */
+    maxDuracionHoras: Int = 0,
+    onDuracionChange: (Int) -> Unit = {},
+    /** Mensajes del dueño sin leer en el chat de esta cancha. */
+    mensajesSinLeer: Int = 0,
+    onChatClick: () -> Unit = {},
     /** Productos del kiosco que se pueden comprar con la reserva. */
     productos: List<Producto> = emptyList(),
     /** Id del producto -> cantidad elegida. */
@@ -88,6 +98,13 @@ fun DetallesCanchaScreen(
 ) {
     val totalProductos = productos.sumOf { (cantidades[it.id] ?: 0) * it.precio }
     val unidades = productos.sumOf { cantidades[it.id] ?: 0 }
+    val duracion = duracionHoras.coerceAtLeast(1)
+    val precioCancha = cancha.precioHora * duracion
+    // Horas que quedan dentro de la reserva elegida (se resaltan todas).
+    val horasElegidas = horaSeleccionada?.let { inicio ->
+        val desde = horas.indexOf(inicio)
+        if (desde < 0) emptySet() else horas.drop(desde).take(duracion).toSet()
+    } ?: emptySet()
     Surface(
         modifier = modifier.fillMaxSize(),
         color = DarkBackground
@@ -159,6 +176,55 @@ fun DetallesCanchaScreen(
                 if (cancha.direccion.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     DatoCancha(Icons.Outlined.LocationOn, cancha.direccion)
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Chat con el dueño de la cancha
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkCardBackground)
+                        .clickable { onChatClick() }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.Chat,
+                        contentDescription = null,
+                        tint = PrimaryGreen,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Chatear con el dueño",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextWhite
+                        )
+                        Text(
+                            text = "Pregunta por horarios, productos o lo que necesites",
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    if (mensajesSinLeer > 0) {
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .background(PrimaryGreen, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (mensajesSinLeer > 9) "9+" else mensajesSinLeer.toString(),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DarkBackground
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -236,7 +302,7 @@ fun DetallesCanchaScreen(
                             val ocupada = hora in horasOcupadas
                             ChipHora(
                                 hora = hora,
-                                isSelected = hora == horaSeleccionada,
+                                isSelected = hora in horasElegidas,
                                 ocupada = ocupada,
                                 onClick = { if (!ocupada) onHoraSelected(hora) },
                                 modifier = Modifier.weight(1f)
@@ -244,6 +310,53 @@ fun DetallesCanchaScreen(
                         }
                         // Relleno para que la última fila mantenga el mismo ancho de chips
                         repeat(4 - fila.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // Cuántas horas seguidas reservar desde la hora elegida.
+                if (horaSeleccionada != null && maxDuracionHoras > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkCardBackground)
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Duración",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextWhite
+                            )
+                            Text(
+                                text = "$horaSeleccionada – ${Validaciones.sumarHoras(horaSeleccionada, duracion)}" +
+                                    if (maxDuracionHoras == 1) " · solo hay 1 hora libre seguida" else "",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        BotonDuracion(
+                            texto = "−",
+                            habilitado = duracion > 1,
+                            onClick = { onDuracionChange(duracion - 1) }
+                        )
+                        Text(
+                            text = if (duracion == 1) "1 hora" else "$duracion horas",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = PrimaryGreen,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.width(76.dp)
+                        )
+                        BotonDuracion(
+                            texto = "+",
+                            habilitado = duracion < maxDuracionHoras,
+                            onClick = { onDuracionChange(duracion + 1) }
+                        )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
@@ -361,7 +474,10 @@ fun DetallesCanchaScreen(
                             LineaResumen("Reserva a nombre de", equipo.nombre)
                             Spacer(modifier = Modifier.height(6.dp))
                         }
-                        LineaResumen("Cancha (1 hora)", formatearPrecio(cancha.precioHora))
+                        LineaResumen(
+                            if (duracion == 1) "Cancha (1 hora)" else "Cancha ($duracion horas)",
+                            formatearPrecio(precioCancha)
+                        )
                         if (unidades > 0) {
                             Spacer(modifier = Modifier.height(6.dp))
                             LineaResumen(
@@ -372,7 +488,7 @@ fun DetallesCanchaScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         HorizontalDivider(color = DarkChipBackground, thickness = 1.dp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        LineaResumen("Total", formatearPrecio(cancha.precioHora + totalProductos), destacado = true)
+                        LineaResumen("Total", formatearPrecio(precioCancha + totalProductos), destacado = true)
                     }
                 }
 
@@ -398,8 +514,8 @@ fun DetallesCanchaScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    text = if (unidades > 0) {
-                        "Reservar y pagar ${formatearPrecio(cancha.precioHora + totalProductos)}"
+                    text = if (horaSeleccionada != null || unidades > 0) {
+                        "Reservar y pagar ${formatearPrecio(precioCancha + totalProductos)}"
                     } else {
                         "Reservar ahora"
                     },
@@ -409,6 +525,25 @@ fun DetallesCanchaScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun BotonDuracion(texto: String, habilitado: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(if (habilitado) SelectedChipBackground else DarkChipBackground)
+            .clickable(enabled = habilitado) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = texto,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (habilitado) PrimaryGreen else TextDisabled
+        )
     }
 }
 

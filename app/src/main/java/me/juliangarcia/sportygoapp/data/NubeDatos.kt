@@ -31,6 +31,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  - canchas/{id}, productos/{id}, equipos/{id}, reservas/{id}
  *  - grabaciones/{id}        solo se descargan las del usuario en sesión
  *  - notificaciones/{id}     solo se descargan las del usuario en sesión
+ *  - mensajes/{id}           chat jugador-dueño; solo los de los chats del usuario en sesión
  */
 object NubeDatos {
 
@@ -53,6 +54,7 @@ object NubeDatos {
     val reservas = Coleccion("reservas", ::leerReserva, ::escribirReserva)
     val grabaciones = Coleccion("grabaciones", ::leerGrabacion, ::escribirGrabacion)
     val notificaciones = Coleccion("notificaciones", ::leerNotificacion, ::escribirNotificacion)
+    val mensajes = Coleccion("mensajes", ::leerMensaje, ::escribirMensaje)
 
     // ---------------------------------------------------------------
     // Escucha en tiempo real
@@ -73,7 +75,9 @@ object NubeDatos {
             equipos.escuchar(db.collection("equipos")),
             reservas.escuchar(db.collection("reservas")),
             grabaciones.escuchar(db.collection("grabaciones").whereEqualTo("usuarioId", uid)),
-            notificaciones.escuchar(db.collection("notificaciones").whereEqualTo("usuarioId", uid))
+            notificaciones.escuchar(db.collection("notificaciones").whereEqualTo("usuarioId", uid)),
+            // Chats: solo los mensajes de las conversaciones en las que participa.
+            mensajes.escuchar(db.collection("mensajes").whereArrayContains("participantes", uid))
         )
         withTimeoutOrNull(15_000) { cargas.awaitAll() }
     }
@@ -83,7 +87,7 @@ object NubeDatos {
         escuchas.forEach { it.remove() }
         escuchas.clear()
         uidEscuchado = null
-        listOf(usuarios, canchas, productos, equipos, reservas, grabaciones, notificaciones)
+        listOf(usuarios, canchas, productos, equipos, reservas, grabaciones, notificaciones, mensajes)
             .forEach { it.limpiar() }
     }
 
@@ -320,6 +324,7 @@ object NubeDatos {
             nombreCancha = d.texto("nombreCancha"),
             fecha = d.obligatorio("fecha"),
             hora = d.obligatorio("hora"),
+            duracionHoras = d.entero("duracionHoras").coerceAtLeast(1),
             precio = d.entero("precio"),
             // Un producto dañado no invalida la reserva completa.
             productos = items.mapNotNull { m ->
@@ -347,6 +352,7 @@ object NubeDatos {
         "nombreCancha" to r.nombreCancha,
         "fecha" to r.fecha,
         "hora" to r.hora,
+        "duracionHoras" to r.duracionHoras,
         "precio" to r.precio,
         "productos" to r.productos.map {
             mapOf(
@@ -402,6 +408,31 @@ object NubeDatos {
         creadaEn = d.largo("creadaEn"),
         leida = d.getBoolean("leida") ?: false,
         mostrada = d.getBoolean("mostrada") ?: false
+    )
+
+    private fun leerMensaje(d: DocumentSnapshot) = Mensaje(
+        id = d.id,
+        chatId = d.obligatorio("chatId"),
+        canchaId = d.obligatorio("canchaId"),
+        jugadorId = d.obligatorio("jugadorId"),
+        duenioId = d.obligatorio("duenioId"),
+        autorId = d.obligatorio("autorId"),
+        texto = d.texto("texto"),
+        enviadoEn = d.largo("enviadoEn"),
+        leido = d.getBoolean("leido") ?: false
+    )
+
+    private fun escribirMensaje(m: Mensaje) = mapOf(
+        "chatId" to m.chatId,
+        "canchaId" to m.canchaId,
+        "jugadorId" to m.jugadorId,
+        "duenioId" to m.duenioId,
+        // Para las reglas de seguridad y para escuchar solo los chats propios.
+        "participantes" to listOf(m.jugadorId, m.duenioId),
+        "autorId" to m.autorId,
+        "texto" to m.texto,
+        "enviadoEn" to m.enviadoEn,
+        "leido" to m.leido
     )
 
     private fun escribirNotificacion(n: Notificacion) = mapOf(

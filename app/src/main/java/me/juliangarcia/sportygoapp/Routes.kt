@@ -56,6 +56,14 @@ object Routes {
     const val REPRODUCIR_PATRON = "$REPRODUCIR/{$ARG_GRABACION_ID}"
     fun reproducir(grabacionId: String) = "$REPRODUCIR/$grabacionId"
 
+    // Chat jugador-dueño de una cancha
+    const val CHAT = "chat"
+    const val ARG_JUGADOR_ID = "jugadorId"
+    const val CHAT_PATRON = "$CHAT/{$ARG_CANCHA_ID}/{$ARG_JUGADOR_ID}"
+    fun chat(canchaId: String, jugadorId: String) = "$CHAT/$canchaId/$jugadorId"
+    /** Lista de conversaciones del dueño con los jugadores. */
+    const val CHATS = "chats"
+
     // Gestión del Propietario / Cancha
     const val REGISTER_FIELD = "register_field"
     const val ADD_FIELD = "add_field"

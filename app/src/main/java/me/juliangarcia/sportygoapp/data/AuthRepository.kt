@@ -252,6 +252,16 @@ class AuthRepository(private val nube: NubeDatos = NubeDatos) {
     fun marcarSinGrabar(reservaId: String) =
         nube.reservas.actualizar(reservaId, mapOf("sinGrabar" to true)) { it.copy(sinGrabar = true) }
 
+    // ---------- Chat jugador-dueño ----------
+
+    /** Mensajes de los chats en los que participa el usuario en sesión. */
+    fun misMensajes(): List<Mensaje> = nube.mensajes.todos
+
+    fun guardarMensaje(mensaje: Mensaje) = nube.mensajes.guardar(mensaje.id, mensaje)
+
+    fun marcarMensajeLeido(id: String) =
+        nube.mensajes.actualizar(id, mapOf("leido" to true)) { it.copy(leido = true) }
+
     // ---------- Notificaciones ----------
 
     fun notificacionesDe(usuarioId: String): List<Notificacion> =

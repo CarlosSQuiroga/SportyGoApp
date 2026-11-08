@@ -264,7 +264,7 @@ private fun ReservaResumen(reserva: Reserva) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${reserva.fecha} · ${reserva.hora} · 1 hora",
+                    text = "${reserva.fecha} · ${reserva.rangoHoras}",
                     fontSize = 14.sp,
                     color = TextSecondary
                 )

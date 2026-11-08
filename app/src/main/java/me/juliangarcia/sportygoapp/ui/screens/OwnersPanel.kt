@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.EmojiEvents
@@ -83,6 +84,9 @@ fun OwnersPanelScreen(
     onNotificacionesClick: () -> Unit = {},
     onFiltroIngresosTabClick: (String) -> Unit = {},
     onInventarioClick: () -> Unit = {},
+    /** Mensajes de jugadores sin leer (chat con los jugadores). */
+    mensajesSinLeer: Int = 0,
+    onMensajesClick: () -> Unit = {},
     onBottomNavTabClick: (String) -> Unit = {}
 ) {
     Surface(
@@ -462,6 +466,67 @@ fun OwnersPanelScreen(
                             color = TextWhite,
                             modifier = Modifier.weight(1f)
                         )
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Chat con los jugadores que escriben desde la cancha
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onMensajesClick() },
+                    colors = CardDefaults.cardColors(
+                        containerColor = DarkCardBackground
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.Chat,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Text(
+                            text = "Mensajes de jugadores",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextWhite,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        if (mensajesSinLeer > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .background(PrimaryGreen, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (mensajesSinLeer > 9) "9+" else mensajesSinLeer.toString(),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DarkBackground
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
 
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,

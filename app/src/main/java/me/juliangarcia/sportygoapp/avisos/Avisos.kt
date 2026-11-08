@@ -144,7 +144,7 @@ class Avisos(context: Context) {
         const val CANAL_GENERAL = "general"
         const val CANAL_GRABACION = "grabacion"
 
-        /** Minutos que dura cada reserva (y la ventana para grabarla). */
+        /** Minutos que dura cada hora reservada (la reserva dura duracionHoras de estas). */
         const val DURACION_MINUTOS = 60L
 
         private val FORMATO_HORA = DateTimeFormatter.ofPattern("H:mm")
@@ -157,10 +157,11 @@ class Avisos(context: Context) {
             )
         }.getOrNull()
 
-        /** true si [ahora] está dentro de la hora reservada. */
+        /** true si [ahora] está dentro del horario reservado (todas sus horas). */
         fun enCurso(reserva: Reserva, ahora: LocalDateTime = LocalDateTime.now()): Boolean {
             val inicio = inicioDe(reserva) ?: return false
-            return !ahora.isBefore(inicio) && ahora.isBefore(inicio.plusMinutes(DURACION_MINUTOS))
+            val fin = inicio.plusMinutes(DURACION_MINUTOS * reserva.duracionHoras.coerceAtLeast(1))
+            return !ahora.isBefore(inicio) && ahora.isBefore(fin)
         }
     }
 }

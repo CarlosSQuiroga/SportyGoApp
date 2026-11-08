@@ -68,6 +68,17 @@ class AuthState(
     var misEquipos: List<Equipo> by mutableStateOf(emptyList())
         private set
 
+    /** Mensajes de los chats del usuario en sesión (con dueños o con jugadores). */
+    var misMensajes: List<Mensaje> by mutableStateOf(emptyList())
+        private set
+
+    /** Chat que se está viendo en pantalla: sus mensajes nuevos no generan aviso. */
+    var chatAbierto: String? = null
+
+    /** Mensajes recibidos ya avisados en el teléfono (o que ya estaban al iniciar sesión). */
+    private val mensajesAvisados = mutableSetOf<String>()
+    private var mensajesCargados = false
+
     init {
         // Cambios que llegan de la nube (otro teléfono reservó, aceptaron un pago, etc.).
         NubeDatos.onCambio = {
@@ -111,8 +122,13 @@ class AuthState(
             misNotificaciones = emptyList()
             misProductos = emptyList()
             misEquipos = emptyList()
+            misMensajes = emptyList()
+            mensajesAvisados.clear()
+            mensajesCargados = false
             return
         }
+        misMensajes = repo.misMensajes().sortedBy { it.enviadoEn }
+        avisarMensajesNuevos(u.id)
         misEquipos = repo.equiposDe(u.id).sortedBy { it.nombre.lowercase() }
         cancha = if (u.rol == UserRole.DUENIO) repo.canchaDe(u.id) else null
         misProductos = cancha?.let { productosDeCancha(it.id) } ?: emptyList()
@@ -234,12 +250,20 @@ class AuthState(
         hora: String?,
         carrito: Map<String, Int> = emptyMap(),
         /** Equipo del jugador que hace la reserva (null = sin equipo). */
-        equipoId: String? = null
+        equipoId: String? = null,
+        /** Horas seguidas desde [hora]. */
+        duracionHoras: Int = 1
     ): String? {
         val actual = usuario ?: return "Debes iniciar sesión."
         val c = repo.canchaPorId(canchaId) ?: return "La cancha ya no está disponible."
         if (fecha == null) return "Selecciona un día."
         if (hora == null) return "Selecciona una hora."
+        if (duracionHoras < 1) return "Elige cuántas horas quieres reservar."
+        val bloque = Validaciones.horasSeguidas(hora, duracionHoras)
+        val disponibles = Validaciones.horasDeReserva(c, fecha)
+        if (!bloque.all { it in disponibles }) {
+            return "La cancha no está abierta todas esas horas. Elige menos horas."
+        }
         val pasarela = pagos ?: return "Los pagos no están disponibles en este momento."
 
         // Pagos con Nequi: el jugador paga desde su número y el dueño recibe en el suyo.
@@ -249,9 +273,12 @@ class AuthState(
             ?: return "Esta cancha no está recibiendo reservas por ahora."
 
         val fechaTexto = fecha.format(FORMATO_FECHA)
-        val ocupada = repo.reservasDeCancha(c.id)
-            .any { it.estado != EstadoReserva.RECHAZADA && it.fecha == fechaTexto && it.hora == hora }
-        if (ocupada) return "Ese horario ya está reservado. Elige otro."
+        val ocupada = horasOcupadas(c.id, fecha).intersect(bloque.toSet())
+        if (ocupada.isNotEmpty()) {
+            return "Las ${ocupada.joinToString(", ")} ya están reservadas. Elige otro horario."
+        }
+        val precioCancha = c.precioHora * duracionHoras
+        val horario = "${hora} a ${Validaciones.sumarHoras(hora, duracionHoras)}"
 
         // Precio y nombre actuales de cada producto (solo los que siguen existiendo).
         val compra = repo.productosDeCancha(c.id).mapNotNull { p ->
@@ -259,7 +286,7 @@ class AuthState(
             if (cantidad <= 0) null
             else ItemCompra(p.id, p.nombre, p.precio, cantidad)
         }
-        val total = c.precioHora + compra.sumOf { it.subtotal }
+        val total = precioCancha + compra.sumOf { it.subtotal }
 
         // Solo puede reservar a nombre de un equipo que creó.
         val equipo = equipoId?.let { id ->
@@ -273,7 +300,7 @@ class AuthState(
             nequiOrigen = nequiJugador,
             nequiDestino = nequiDuenio,
             monto = total,
-            descripcion = "SportyGo · ${c.nombre} · $fechaTexto $hora" +
+            descripcion = "SportyGo · ${c.nombre} · $fechaTexto $horario" +
                 if (compra.isNotEmpty()) " + productos" else ""
         )
 
@@ -284,7 +311,8 @@ class AuthState(
             nombreCancha = c.nombre,
             fecha = fechaTexto,
             hora = hora,
-            precio = c.precioHora,
+            duracionHoras = duracionHoras,
+            precio = precioCancha,
             productos = compra,
             estado = EstadoReserva.PENDIENTE_PAGO,
             pagoId = cobro.id,
@@ -300,7 +328,7 @@ class AuthState(
             tipo = TipoNotificacion.PAGO_PENDIENTE,
             titulo = "Acepta el pago en Nequi · ${formatoPesos(total)}",
             mensaje = "Enviamos una solicitud de pago a tu Nequi ${ocultarNumero(nequiJugador)} " +
-                "por tu reserva en ${c.nombre} el $fechaTexto a las $hora. " +
+                "por tu reserva en ${c.nombre} el $fechaTexto de $horario. " +
                 "La reserva se confirma cuando aceptes el pago en Nequi.",
             // Id fijo para poder quitarla del teléfono cuando el pago se resuelva.
             id = idAvisoPago(reserva.id)
@@ -356,7 +384,7 @@ class AuthState(
             titulo = "Reserva confirmada",
             mensaje = buildString {
                 append("Pagaste ${formatoPesos(r.total)} con Nequi. ")
-                append("Tu reserva en ${r.nombreCancha} el ${r.fecha} a las ${r.hora} está confirmada. ")
+                append("Tu reserva en ${r.nombreCancha} el ${r.fecha} de ${r.rangoHoras} está confirmada. ")
                 if (r.productos.isNotEmpty()) {
                     append("Productos: ${resumenCompra(r.productos)}. Reclámalos en $dondeReclamar. ")
                 }
@@ -371,7 +399,7 @@ class AuthState(
             usuarioId = ownerId,
             tipo = TipoNotificacion.RESERVA_RECIBIDA,
             titulo = "Nueva reserva en ${r.nombreCancha}",
-            mensaje = "$jugador reservó tu cancha el ${r.fecha} a las ${r.hora} y pagó " +
+            mensaje = "$jugador reservó tu cancha el ${r.fecha} de ${r.rangoHoras} y pagó " +
                 "${formatoPesos(r.total)}. El dinero se envió a tu Nequi ${ocultarNumero(r.nequiDestino)}."
         )
         if (r.productos.isNotEmpty()) {
@@ -394,7 +422,7 @@ class AuthState(
             tipo = TipoNotificacion.PAGO_RECHAZADO,
             titulo = "Pago rechazado",
             mensaje = "Rechazaste el pago en Nequi, así que la reserva en ${r.nombreCancha} " +
-                "el ${r.fecha} a las ${r.hora} no se hizo. Ese horario quedó libre."
+                "el ${r.fecha} de ${r.rangoHoras} no se hizo. Ese horario quedó libre."
         )
     }
 
@@ -492,6 +520,111 @@ class AuthState(
     private fun formatoPesos(valor: Int): String =
         "$" + java.text.NumberFormat.getIntegerInstance(java.util.Locale.forLanguageTag("es-CO"))
             .format(valor)
+
+    // ---------------------------------------------------------------
+    // Chat jugador-dueño
+    // ---------------------------------------------------------------
+
+    /** Mensajes de la conversación [chatId], del más antiguo al más reciente. */
+    fun mensajesDeChat(chatId: String): List<Mensaje> = misMensajes.filter { it.chatId == chatId }
+
+    /** Mensajes recibidos (no escritos por mí) sin leer en [chatId]. */
+    fun noLeidosEnChat(chatId: String): Int {
+        val yo = usuario?.id ?: return 0
+        return misMensajes.count { it.chatId == chatId && it.autorId != yo && !it.leido }
+    }
+
+    /** Conversaciones del usuario en sesión, la más reciente primero. */
+    fun misConversaciones(): List<Conversacion> {
+        val yo = usuario?.id ?: return emptyList()
+        return misMensajes.groupBy { it.chatId }.map { (chatId, lista) ->
+            val ultimo = lista.maxBy { it.enviadoEn }
+            Conversacion(
+                chatId = chatId,
+                canchaId = ultimo.canchaId,
+                jugadorId = ultimo.jugadorId,
+                duenioId = ultimo.duenioId,
+                ultimo = ultimo,
+                noLeidos = lista.count { it.autorId != yo && !it.leido }
+            )
+        }.sortedByDescending { it.ultimo.enviadoEn }
+    }
+
+    /** Total de mensajes recibidos sin leer (para el panel del dueño). */
+    fun totalMensajesSinLeer(): Int {
+        val yo = usuario?.id ?: return 0
+        return misMensajes.count { it.autorId != yo && !it.leido }
+    }
+
+    /**
+     * Envía [texto] en el chat de la cancha [canchaId] con el jugador [jugadorId]. Lo puede
+     * escribir ese jugador o el dueño de la cancha. Devuelve un mensaje de error, o null si se envió.
+     */
+    fun enviarMensaje(canchaId: String, jugadorId: String, texto: String): String? {
+        val yo = usuario ?: return "Debes iniciar sesión."
+        val c = repo.canchaPorId(canchaId) ?: return "La cancha ya no está disponible."
+        if (yo.id != jugadorId && yo.id != c.ownerId) return "No participas en este chat."
+        if (jugadorId == c.ownerId) return "No puedes escribirte a ti mismo."
+        val limpio = texto.trim()
+        if (limpio.isEmpty()) return "Escribe un mensaje."
+        if (limpio.length > 1000) return "El mensaje es muy largo (máximo 1000 caracteres)."
+
+        val m = Mensaje(
+            id = UUID.randomUUID().toString(),
+            chatId = Mensaje.idChat(canchaId, jugadorId),
+            canchaId = canchaId,
+            jugadorId = jugadorId,
+            duenioId = c.ownerId,
+            autorId = yo.id,
+            texto = limpio,
+            enviadoEn = System.currentTimeMillis()
+        )
+        repo.guardarMensaje(m)
+        mensajesAvisados += m.id
+        misMensajes = repo.misMensajes().sortedBy { it.enviadoEn }
+        return null
+    }
+
+    /** Marca como leídos los mensajes que recibí en [chatId]. */
+    fun marcarChatLeido(chatId: String) {
+        val yo = usuario?.id ?: return
+        avisos?.quitar("chat-$chatId")
+        val pendientes = misMensajes.filter { it.chatId == chatId && it.autorId != yo && !it.leido }
+        if (pendientes.isEmpty()) return
+        pendientes.forEach { repo.marcarMensajeLeido(it.id) }
+        misMensajes = repo.misMensajes().sortedBy { it.enviadoEn }
+    }
+
+    /**
+     * Muestra en el teléfono los mensajes que acaban de llegar (no los que ya estaban al
+     * iniciar sesión, ni los del chat que está abierto en pantalla).
+     */
+    private fun avisarMensajesNuevos(yo: String) {
+        val recibidos = misMensajes.filter { it.autorId != yo && !it.leido }
+        if (!mensajesCargados) {
+            mensajesAvisados += recibidos.map { it.id }
+            mensajesCargados = true
+            return
+        }
+        recibidos.filter { it.id !in mensajesAvisados }.forEach { m ->
+            mensajesAvisados += m.id
+            if (m.chatId == chatAbierto) return@forEach
+            val autor = repo.usuarioPorId(m.autorId)?.nombreUsuario ?: "Alguien"
+            val cancha = repo.canchaPorId(m.canchaId)?.nombre.orEmpty()
+            avisos?.mostrar(
+                Notificacion(
+                    // Un solo aviso por chat: el nuevo reemplaza al anterior.
+                    id = "chat-${m.chatId}",
+                    usuarioId = yo,
+                    tipo = TipoNotificacion.MENSAJE_NUEVO,
+                    titulo = if (m.autorId == m.duenioId) "$autor · $cancha" else "$autor te escribió",
+                    mensaje = m.texto,
+                    creadaEn = m.enviadoEn,
+                    mostrada = true
+                )
+            )
+        }
+    }
 
     // ---------------------------------------------------------------
     // Notificaciones
@@ -654,7 +787,7 @@ class AuthState(
         // Las pendientes de pago también apartan el horario; las rechazadas lo liberan.
         return repo.reservasDeCancha(canchaId)
             .filter { it.fecha == fechaTexto && it.estado != EstadoReserva.RECHAZADA }
-            .map { it.hora }
+            .flatMap { it.horasOcupadas }
             .toSet()
     }
 

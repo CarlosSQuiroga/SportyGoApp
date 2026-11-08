@@ -68,6 +68,27 @@ service cloud.firestore {
       allow create: if logueado() && nuevo().usuarioId == request.auth.uid;
     }
 
+    // Chat jugador-dueño: solo los dos participantes leen la conversación. El autor debe ser
+    // uno de ellos y el dueño debe ser de verdad el dueño de la cancha. El destinatario solo
+    // puede marcar el mensaje como leído.
+    match /mensajes/{mensajeId} {
+      allow read: if logueado() && request.auth.uid in resource.data.participantes;
+      allow create: if logueado()
+        && nuevo().autorId == request.auth.uid
+        && nuevo().participantes == [nuevo().jugadorId, nuevo().duenioId]
+        && request.auth.uid in nuevo().participantes
+        && nuevo().jugadorId != nuevo().duenioId
+        && nuevo().chatId == nuevo().canchaId + '_' + nuevo().jugadorId
+        && get(/databases/$(database)/documents/canchas/$(nuevo().canchaId)).data.ownerId
+           == nuevo().duenioId
+        && nuevo().texto is string && nuevo().texto.size() > 0 && nuevo().texto.size() <= 1000;
+      allow update: if logueado()
+        && request.auth.uid in resource.data.participantes
+        && request.auth.uid != resource.data.autorId
+        && nuevo().diff(resource.data).affectedKeys().hasOnly(['leido']);
+      allow delete: if false;
+    }
+
     // Notificaciones: cualquiera con sesión puede enviar una (p. ej. el jugador avisa al
     // dueño de una nueva reserva), pero solo el destinatario las lee y las marca.
     match /notificaciones/{notificacionId} {

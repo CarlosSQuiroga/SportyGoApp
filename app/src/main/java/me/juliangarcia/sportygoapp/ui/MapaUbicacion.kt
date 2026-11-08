@@ -4,6 +4,11 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.location.Address
 import android.location.Geocoder
 import android.location.Location
@@ -47,6 +52,42 @@ private val CENTRO_COLOMBIA = GeoPoint(4.5709, -74.2973)
 
 /** Color de los marcadores de canchas (verde de la app). */
 private const val COLOR_MARCADOR_CANCHA = 0xFF2DBE5C.toInt()
+
+/** Color del punto "Estás aquí" (azul, distinto del verde de las canchas). */
+private const val COLOR_MI_UBICACION = 0xFF2F80ED.toInt()
+
+/**
+ * Ícono único de "Estás aquí": punto azul con borde blanco y halo, el mismo para jugador y
+ * dueño de cancha. Es distinto del pin de las canchas para no confundirlos.
+ */
+private fun iconoMiUbicacion(context: Context): Drawable {
+    val densidad = context.resources.displayMetrics.density
+    val lado = (34 * densidad).toInt()
+    val bitmap = Bitmap.createBitmap(lado, lado, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val c = lado / 2f
+    val pincel = Paint(Paint.ANTI_ALIAS_FLAG)
+    // Halo
+    pincel.color = COLOR_MI_UBICACION
+    pincel.alpha = 60
+    canvas.drawCircle(c, c, c, pincel)
+    // Borde blanco
+    pincel.color = android.graphics.Color.WHITE
+    canvas.drawCircle(c, c, 9 * densidad, pincel)
+    // Punto
+    pincel.color = COLOR_MI_UBICACION
+    canvas.drawCircle(c, c, 6.5f * densidad, pincel)
+    return BitmapDrawable(context.resources, bitmap)
+}
+
+/** Marcador "Estás aquí" (siempre el mismo ícono, centrado en el punto). */
+private fun marcadorMiUbicacion(mapView: MapView, punto: GeoPoint): Marker =
+    Marker(mapView).apply {
+        position = punto
+        title = "Estás aquí"
+        icon = iconoMiUbicacion(mapView.context)
+        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+    }
 
 /** Estado de la ubicación del usuario para el mapa de canchas. */
 @Stable
@@ -271,6 +312,8 @@ fun MapaCiudad(
     zoom: Double = 14.0,
     /** false = mapa fijo de solo lectura (ej. vista previa de la ubicación de la cancha). */
     interactivo: Boolean = true,
+    /** true = centrar en el usuario; false = centrar en la primera cancha (si hay). */
+    centrarEnUsuario: Boolean = true,
     onCanchaClick: (String) -> Unit = {}
 ) {
     val mapView = rememberMapView()
@@ -281,15 +324,7 @@ fun MapaCiudad(
 
         // Primero el usuario y luego las canchas, para que las canchas queden encima y
         // reciban el toque aunque estén en el mismo punto.
-        if (ubicacion != null) {
-            mapView.overlays.add(
-                Marker(mapView).apply {
-                    position = ubicacion
-                    title = "Estás aquí"
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                }
-            )
-        }
+        if (ubicacion != null) mapView.overlays.add(marcadorMiUbicacion(mapView, ubicacion))
 
         canchas.forEach { c ->
             mapView.overlays.add(
@@ -306,7 +341,8 @@ fun MapaCiudad(
             )
         }
 
-        val centro = ubicacion ?: canchas.firstOrNull()?.punto
+        val primeraCancha = canchas.firstOrNull()?.punto
+        val centro = if (centrarEnUsuario) ubicacion ?: primeraCancha else primeraCancha ?: ubicacion
         if (centro != null) {
             mapView.controller.setZoom(zoom)
             mapView.controller.setCenter(centro)
@@ -329,6 +365,8 @@ fun MapaSeleccion(
     onCentroChange: (GeoPoint) -> Unit,
     modifier: Modifier = Modifier,
     recentrar: Int = 0,
+    /** Ubicación actual del usuario: se dibuja con el ícono "Estás aquí". */
+    ubicacionUsuario: GeoPoint? = null,
     /** Se llama cuando el usuario toca/arrastra el mapa. */
     onToque: () -> Unit = {}
 ) {
@@ -347,6 +385,14 @@ fun MapaSeleccion(
         }
         mapView.addMapListener(listener)
         onDispose { mapView.removeMapListener(listener) }
+    }
+
+    LaunchedEffect(mapView, ubicacionUsuario) {
+        mapView.overlays.removeAll { it is Marker }
+        if (ubicacionUsuario != null) {
+            mapView.overlays.add(marcadorMiUbicacion(mapView, ubicacionUsuario))
+        }
+        mapView.invalidate()
     }
 
     LaunchedEffect(mapView, irA, recentrar) {

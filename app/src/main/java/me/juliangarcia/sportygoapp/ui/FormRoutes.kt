@@ -559,6 +559,7 @@ fun PerfilRoute(
     onMisGrabacionesClick: () -> Unit,
     onMisEquiposClick: () -> Unit,
     onMetodosPagoClick: () -> Unit,
+    onConfiguracionClick: () -> Unit,
     onBottomNavTabClick: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -593,6 +594,7 @@ fun PerfilRoute(
         onMisGrabacionesClick = onMisGrabacionesClick,
         onMisEquiposClick = onMisEquiposClick,
         onMetodosPagoClick = onMetodosPagoClick,
+        onConfiguracionClick = onConfiguracionClick,
         // Al cerrar sesión, la navegación detecta que ya no hay usuario y vuelve a la bienvenida.
         onCerrarSesionClick = { auth.cerrarSesion() },
         onBottomNavTabClick = onBottomNavTabClick

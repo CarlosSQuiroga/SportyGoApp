@@ -22,6 +22,7 @@ object Routes {
     const val TEAMS = "teams"
     const val CREAR_EQUIPO = "crear_equipo"
     const val PROFILE = "profile"
+    const val CONFIGURACION = "configuracion"
 
     // Pagos con Nequi
     const val METODO_PAGO = "metodo_pago"

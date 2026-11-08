@@ -25,7 +25,9 @@ class AuthState(
     /** Notificaciones del sistema y alarmas (null en previews/pruebas). */
     private val avisos: Avisos? = null,
     /** Cobros por Nequi (hoy de prueba, ver NequiSimulado). */
-    private val pagos: PasarelaPagos? = null
+    private val pagos: PasarelaPagos? = null,
+    /** Ajustes de "Configuración" guardados en el teléfono (null en previews/pruebas). */
+    val preferencias: Preferencias? = null
 ) {
 
     private val scope = MainScope()
@@ -194,6 +196,16 @@ class AuthState(
         val actualizado = repo.elegirRol(actual.id, rol) ?: return
         usuario = actualizado
         recargarDatosDeUsuario()
+    }
+
+    /**
+     * Envía al correo de la cuenta un enlace de Firebase para crear una nueva contraseña.
+     * Devuelve un mensaje de error, o null si se envió.
+     */
+    suspend fun enviarCambioContrasena(): String? {
+        val correo = usuario?.correo?.takeIf { it.isNotBlank() }
+            ?: return "Tu cuenta no tiene un correo registrado."
+        return repo.enviarRestablecerContrasena(correo)
     }
 
     /** Guarda la ruta local de la nueva foto de perfil (o null para quitarla). */
@@ -609,6 +621,7 @@ class AuthState(
         recibidos.filter { it.id !in mensajesAvisados }.forEach { m ->
             mensajesAvisados += m.id
             if (m.chatId == chatAbierto) return@forEach
+            if (preferencias?.avisosChat == false) return@forEach
             val autor = repo.usuarioPorId(m.autorId)?.nombreUsuario ?: "Alguien"
             val cancha = repo.canchaPorId(m.canchaId)?.nombre.orEmpty()
             avisos?.mostrar(

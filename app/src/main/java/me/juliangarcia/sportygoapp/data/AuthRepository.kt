@@ -98,6 +98,19 @@ class AuthRepository(private val nube: NubeDatos = NubeDatos) {
         }
     }
 
+    /** Envía el correo de Firebase para cambiar la contraseña. Devuelve un error o null. */
+    suspend fun enviarRestablecerContrasena(correo: String): String? = try {
+        nube.auth.sendPasswordResetEmail(correo).await()
+        null
+    } catch (e: FirebaseNetworkException) {
+        "Sin conexión a internet. Revisa tu red e intenta de nuevo."
+    } catch (e: FirebaseTooManyRequestsException) {
+        "Demasiados intentos. Espera unos minutos e intenta de nuevo."
+    } catch (e: Exception) {
+        Log.w(TAG, "No se pudo enviar el correo de contraseña", e)
+        "No se pudo enviar el correo. Intenta de nuevo."
+    }
+
     fun cerrarSesion() {
         nube.detener()
         nube.auth.signOut()

@@ -43,6 +43,7 @@ import me.juliangarcia.sportygoapp.data.Reserva
 import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.BuscarCanchasRoute
 import me.juliangarcia.sportygoapp.ui.ChatRoute
+import me.juliangarcia.sportygoapp.ui.ConfiguracionRoute
 import me.juliangarcia.sportygoapp.ui.ConversacionesRoute
 import me.juliangarcia.sportygoapp.ui.CrearEquipoRoute
 import me.juliangarcia.sportygoapp.ui.DetallesCanchaRoute
@@ -126,6 +127,8 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
             return@LaunchedEffect
         }
         revisarGrabacion = false
+        // El usuario puede desactivarlo en Configuración.
+        if (auth.preferencias?.camaraAutomatica == false) return@LaunchedEffect
         val reserva = auth.reservaParaGrabar() ?: return@LaunchedEffect
         if (rutaActual == Routes.GRABAR_PARTIDO_PATRON) return@LaunchedEffect
         navController.navigate(Routes.grabarPartido(reserva.id)) { launchSingleTop = true }
@@ -638,7 +641,18 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                     onMisGrabacionesClick = { navController.irA(Routes.RECORD_VIDEO) },
                     onMisEquiposClick = { navController.irA(Routes.TEAMS) },
                     onMetodosPagoClick = { navController.irA(Routes.METODO_PAGO) },
+                    onConfiguracionClick = { navController.irA(Routes.CONFIGURACION) },
                     onBottomNavTabClick = { tab -> navController.irATab(tab, auth) }
+                )
+            }
+        }
+
+        composable(route = Routes.CONFIGURACION) {
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                ConfiguracionRoute(
+                    auth = auth,
+                    onBackClick = { navController.popBackStack() },
+                    onMetodosPagoClick = { navController.irA(Routes.METODO_PAGO) }
                 )
             }
         }

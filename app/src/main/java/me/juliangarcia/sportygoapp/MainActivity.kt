@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import me.juliangarcia.sportygoapp.avisos.Avisos
 import me.juliangarcia.sportygoapp.data.AuthRepository
 import me.juliangarcia.sportygoapp.data.AuthState
+import me.juliangarcia.sportygoapp.data.Preferencias
 import me.juliangarcia.sportygoapp.pagos.NequiSimulado
 import me.juliangarcia.sportygoapp.ui.theme.SportyGoAppTheme
 
@@ -43,7 +44,7 @@ class MainActivity : ComponentActivity() {
         val avisos = Avisos(applicationContext).apply { crearCanales() }
         // Cobros por Nequi: de prueba hasta conectar la app con Nequi a través de un servidor.
         val nequi = NequiSimulado(applicationContext)
-        val auth = AuthState(repo, avisos, nequi)
+        val auth = AuthState(repo, avisos, nequi, Preferencias(applicationContext))
 
         setContent {
             // Android 13+: hay que pedir permiso para mostrar notificaciones.

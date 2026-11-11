@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -13,7 +14,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import me.juliangarcia.sportygoapp.data.AuthState
+import me.juliangarcia.sportygoapp.data.DetectorGoles
 import me.juliangarcia.sportygoapp.data.Grabacion
+import me.juliangarcia.sportygoapp.ui.screens.ConfirmarGolesScreen
 import me.juliangarcia.sportygoapp.data.VideosCompartidos
 import me.juliangarcia.sportygoapp.ui.screens.EliminarGrabacionDialog
 import me.juliangarcia.sportygoapp.ui.screens.RecordVideoScreen
@@ -65,7 +68,9 @@ fun ReproducirGrabacionRoute(
     auth: AuthState,
     grabacionId: String,
     abrirEnMomentoClave: Boolean,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    /** Revisar o corregir los goles (marcador) de la grabación. */
+    onGolesClick: (grabacionId: String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -109,7 +114,8 @@ fun ReproducirGrabacionRoute(
             }
         },
         onRenombrarClick = { aRenombrar = grabacion },
-        onEliminarClick = { aEliminar = grabacion }
+        onEliminarClick = { aEliminar = grabacion },
+        onGolesClick = { onGolesClick(grabacion.id) }
     )
 
     DialogosGrabacion(
@@ -120,6 +126,49 @@ fun ReproducirGrabacionRoute(
         onCerrarEliminar = { aEliminar = null },
         // Al desaparecer la grabación, esta misma ruta vuelve a la lista (ver arriba).
         onEliminada = {}
+    )
+}
+
+/**
+ * Confirmar los goles de una grabación. La primera vez busca en el audio los gritos de gol
+ * (queda guardado, para no repetir el análisis) y luego el usuario elige cuáles fueron gol.
+ */
+@Composable
+fun ConfirmarGolesRoute(
+    auth: AuthState,
+    grabacionId: String,
+    onTerminado: () -> Unit
+) {
+    val grabacion = auth.misGrabaciones.firstOrNull { it.id == grabacionId }
+        ?: auth.grabacionPorId(grabacionId)
+    if (grabacion == null) {
+        LaunchedEffect(Unit) { onTerminado() }
+        return
+    }
+    val archivo = remember(grabacion.videoUri) { AuthState.archivoDeVideo(grabacion) }
+    var progreso by remember { mutableFloatStateOf(0f) }
+    var sinAudio by remember { mutableStateOf(false) }
+    val analizar = archivo != null && !grabacion.audioAnalizado
+
+    LaunchedEffect(grabacion.id, analizar) {
+        if (!analizar || archivo == null) return@LaunchedEffect
+        val marcas = DetectorGoles.buscar(archivo) { p -> progreso = p }
+        sinAudio = marcas == null
+        auth.guardarMarcasPosibles(grabacion.id, marcas.orEmpty())
+    }
+
+    ConfirmarGolesScreen(
+        grabacion = grabacion,
+        videoDisponible = archivo != null,
+        marcasPosibles = grabacion.marcasPosibles,
+        analizando = analizar,
+        progreso = progreso,
+        sinAudio = sinAudio,
+        onGuardar = { goles ->
+            auth.guardarMarcador(grabacion.id, goles)
+            onTerminado()
+        },
+        onOmitir = onTerminado
     )
 }
 

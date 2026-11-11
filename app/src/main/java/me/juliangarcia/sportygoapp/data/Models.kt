@@ -109,10 +109,30 @@ data class Grabacion(
     val rivalId: String = "",
     val nombreRival: String = "",
     /** Nombre que le puso el usuario (vacío = se muestra el nombre de la cancha). */
-    val nombre: String = ""
+    val nombre: String = "",
+    /** true cuando ya se buscaron posibles goles en el audio (aunque no se encontrara ninguno). */
+    val audioAnalizado: Boolean = false,
+    /** Momentos (ms desde el inicio del video) con gritos de gol detectados en el audio. */
+    val marcasPosibles: List<Long> = emptyList(),
+    /** Goles que el usuario confirmó, en orden de tiempo. */
+    val goles: List<Gol> = emptyList(),
+    /** true cuando el usuario revisó las marcas y guardó el marcador. */
+    val marcadorConfirmado: Boolean = false
 ) {
     /** Nombre que se muestra en la lista y al compartir. */
     val titulo: String get() = nombre.ifBlank { nombreCancha.ifBlank { "Partido" } }
+
+    /** Equipo 1 = el que reservó; equipo 2 = el contrincante. */
+    val nombreEquipo1: String get() = nombreEquipo.ifBlank { "Equipo 1" }
+    val nombreEquipo2: String get() = nombreRival.ifBlank { "Equipo 2" }
+
+    val golesEquipo1: Int get() = goles.count { it.equipo == 1 }
+    val golesEquipo2: Int get() = goles.count { it.equipo == 2 }
+
+    /** "Los Halcones 2 – 1 Real Barrio", o null si el marcador no se ha confirmado. */
+    val marcador: String?
+        get() = if (!marcadorConfirmado) null
+        else "$nombreEquipo1 $golesEquipo1 – $golesEquipo2 $nombreEquipo2"
 
     /** "Los Halcones vs Real Barrio", o null si la grabación no tiene equipos. */
     val enfrentamiento: String?
@@ -122,6 +142,14 @@ data class Grabacion(
             else -> "${nombreEquipo.ifBlank { "Sin equipo" }} vs $nombreRival"
         }
 }
+
+/** Gol confirmado en una grabación: momento del video y equipo que lo marcó (1 o 2). */
+data class Gol(
+    /** Milisegundos desde el inicio del video. */
+    val tiempoMs: Long = 0L,
+    /** 1 = equipo que reservó, 2 = contrincante. */
+    val equipo: Int = 1
+)
 
 /**
  * Equipo creado por un usuario. Se puede elegir al reservar (el equipo que reserva)

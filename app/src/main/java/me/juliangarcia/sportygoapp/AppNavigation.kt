@@ -43,6 +43,7 @@ import me.juliangarcia.sportygoapp.data.Validaciones
 import me.juliangarcia.sportygoapp.ui.BuscarCanchasRoute
 import me.juliangarcia.sportygoapp.ui.ChatRoute
 import me.juliangarcia.sportygoapp.ui.ConfiguracionRoute
+import me.juliangarcia.sportygoapp.ui.ConfirmarGolesRoute
 import me.juliangarcia.sportygoapp.ui.GrabacionesRoute
 import me.juliangarcia.sportygoapp.ui.ReproducirGrabacionRoute
 import me.juliangarcia.sportygoapp.ui.ConversacionesRoute
@@ -131,6 +132,8 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
         if (auth.preferencias?.camaraAutomatica == false) return@LaunchedEffect
         val reserva = auth.reservaParaGrabar() ?: return@LaunchedEffect
         if (rutaActual == Routes.GRABAR_PARTIDO_PATRON) return@LaunchedEffect
+        // No interrumpir mientras se confirman los goles de otra grabación.
+        if (rutaActual == Routes.CONFIRMAR_GOLES_PATRON) return@LaunchedEffect
         navController.navigate(Routes.grabarPartido(reserva.id)) { launchSingleTop = true }
     }
 
@@ -537,8 +540,12 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                         rivalSeleccionadoId = rivalId,
                         onRivalSelected = { rivalId = it },
                         onVideoGuardado = { uri -> auth.guardarGrabacion(reserva, uri, rivalId) },
-                        onTerminado = {
-                            navController.navigate(Routes.RECORD_VIDEO) {
+                        onTerminado = { grabacionId ->
+                            // Al detener: confirmar los goles detectados en el audio.
+                            val destino = grabacionId
+                                ?.let { Routes.confirmarGoles(it, alGrabar = true) }
+                                ?: Routes.RECORD_VIDEO
+                            navController.navigate(destino) {
                                 popUpTo(Routes.GRABAR_PARTIDO_PATRON) { inclusive = true }
                                 launchSingleTop = true
                             }
@@ -568,7 +575,38 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                     auth = auth,
                     grabacionId = entry.arguments?.getString(Routes.ARG_GRABACION_ID).orEmpty(),
                     abrirEnMomentoClave = entry.arguments?.getBoolean(Routes.ARG_MOMENTO) ?: false,
-                    onBackClick = { navController.popBackStack() }
+                    onBackClick = { navController.popBackStack() },
+                    onGolesClick = { id -> navController.irA(Routes.confirmarGoles(id)) }
+                )
+            }
+        }
+
+        // Confirmar cuáles marcas de posible gol (detectadas en el audio) fueron gol.
+        composable(
+            route = Routes.CONFIRMAR_GOLES_PATRON,
+            arguments = listOf(
+                navArgument(Routes.ARG_GRABACION_ID) { type = NavType.StringType },
+                navArgument(Routes.ARG_AL_GRABAR) {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }
+            )
+        ) { entry ->
+            RutaProtegida(Acceso.CUALQUIER_ROL, auth, navController) {
+                val alGrabar = entry.arguments?.getBoolean(Routes.ARG_AL_GRABAR) ?: false
+                ConfirmarGolesRoute(
+                    auth = auth,
+                    grabacionId = entry.arguments?.getString(Routes.ARG_GRABACION_ID).orEmpty(),
+                    onTerminado = {
+                        if (alGrabar) {
+                            navController.navigate(Routes.RECORD_VIDEO) {
+                                popUpTo(Routes.CONFIRMAR_GOLES_PATRON) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                    }
                 )
             }
         }

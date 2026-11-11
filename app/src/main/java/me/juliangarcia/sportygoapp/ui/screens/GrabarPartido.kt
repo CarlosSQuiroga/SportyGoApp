@@ -84,8 +84,9 @@ private val TextSecondary = Color(0xFF8C9BAE)
  * Cámara para grabar el partido de [reserva]. Se abre sola cuando el anfitrión entra a la app
  * durante la hora reservada. Al detener la grabación el video queda en "Grabaciones".
  *
- * @param onVideoGuardado guarda el video (se llama aunque el usuario ya haya salido de la pantalla).
- * @param onTerminado la grabación terminó y se guardó: ir a "Grabaciones".
+ * @param onVideoGuardado guarda el video (se llama aunque el usuario ya haya salido de la pantalla)
+ *   y devuelve el id de la grabación guardada (null si no se pudo).
+ * @param onTerminado la grabación terminó y se guardó: confirmar los goles (con el id guardado).
  * @param onAhoraNo el anfitrión no quiere grabar este partido.
  * @param onSalir salir sin grabar (la cámara volverá a abrirse al entrar de nuevo a la app).
  */
@@ -98,8 +99,8 @@ fun GrabarPartidoScreen(
     escudoEquipo: String = "",
     rivalSeleccionadoId: String? = null,
     onRivalSelected: (String?) -> Unit = {},
-    onVideoGuardado: (videoUri: String) -> Unit,
-    onTerminado: () -> Unit,
+    onVideoGuardado: (videoUri: String) -> String?,
+    onTerminado: (grabacionId: String?) -> Unit,
     onAhoraNo: () -> Unit,
     onSalir: () -> Unit
 ) {
@@ -162,8 +163,8 @@ private fun CamaraGrabacion(
     reserva: Reserva,
     /** Equipo que reservó vs. contrincante (con el selector del rival). */
     enfrentamiento: @Composable () -> Unit,
-    onVideoGuardado: (String) -> Unit,
-    onTerminado: () -> Unit,
+    onVideoGuardado: (String) -> String?,
+    onTerminado: (grabacionId: String?) -> Unit,
     onAhoraNo: () -> Unit
 ) {
     val context = LocalContext.current
@@ -251,8 +252,8 @@ private fun CamaraGrabacion(
                 is VideoRecordEvent.Finalize -> {
                     grabacion = null
                     if (videoUtil(evento, archivo)) {
-                        guardar(Uri.fromFile(archivo).toString())
-                        if (estado.activa) terminar()
+                        val id = guardar(Uri.fromFile(archivo).toString())
+                        if (estado.activa) terminar(id)
                     } else {
                         archivo.delete()
                         error = "No se pudo guardar la grabación. Intenta de nuevo."

@@ -24,6 +24,9 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.SportsSoccer
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.outlined.VideocamOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -90,7 +93,9 @@ fun ReproducirGrabacionScreen(
     onCompartirCompletoClick: () -> Unit = {},
     onCompartirMomentoClick: (inicioMs: Long, finMs: Long) -> Unit = { _, _ -> },
     onRenombrarClick: () -> Unit = {},
-    onEliminarClick: () -> Unit = {}
+    onEliminarClick: () -> Unit = {},
+    /** Revisar o corregir los goles y el marcador. */
+    onGolesClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var duracionMs by remember { mutableLongStateOf(duracionInicialMs) }
@@ -356,12 +361,67 @@ fun ReproducirGrabacionScreen(
                         .padding(top = 12.dp)
                 )
             } else {
+                // Marcador y goles: tocar un gol lleva al video unos segundos antes.
+                grabacion.marcador?.let { marcador ->
+                    Text(
+                        text = marcador,
+                        color = PrimaryGreen,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (grabacion.goles.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                        ) {
+                            grabacion.goles.forEach { gol ->
+                                val equipo = if (gol.equipo == 1) grabacion.nombreEquipo1
+                                else grabacion.nombreEquipo2
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(ButtonBackground)
+                                        .clickable(enabled = videoDisponible) {
+                                            videoView.seekTo(
+                                                (gol.tiempoMs - 8_000L).coerceAtLeast(0L).toInt()
+                                            )
+                                            videoView.start()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.SportsSoccer,
+                                        contentDescription = null,
+                                        tint = PrimaryGreen,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${formatoMarca(gol.tiempoMs)} · $equipo",
+                                        color = TextWhite,
+                                        fontSize = 13.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AccionVideo("Compartir", Icons.Outlined.Share, videoDisponible, Modifier.weight(1f)) {
                         onCompartirCompletoClick()
+                    }
+                    AccionVideo("Goles", Icons.Outlined.SportsSoccer, true, Modifier.weight(1f)) {
+                        videoView.pause()
+                        onGolesClick()
                     }
                     AccionVideo("Momento", Icons.Outlined.ContentCut, videoDisponible, Modifier.weight(1f)) {
                         modoMomento = true

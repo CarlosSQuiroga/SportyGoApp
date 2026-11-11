@@ -733,14 +733,15 @@ class AuthState(
      * Guarda el video grabado en "Grabaciones", con el equipo que reservó y, si se eligió,
      * el equipo contrincante ([rivalId]).
      */
-    fun guardarGrabacion(reserva: Reserva, videoUri: String, rivalId: String? = null) {
-        val u = usuario ?: return
+    fun guardarGrabacion(reserva: Reserva, videoUri: String, rivalId: String? = null): String? {
+        val u = usuario ?: return null
         // El nombre guardado en la reserva sirve si el equipo se borra después.
         val equipo = reserva.equipoId.takeIf { it.isNotBlank() }?.let { repo.equipoPorId(it) }
         val rival = rivalId?.let { repo.equipoPorId(it) }
+        val id = UUID.randomUUID().toString()
         repo.guardarGrabacion(
             Grabacion(
-                id = UUID.randomUUID().toString(),
+                id = id,
                 usuarioId = u.id,
                 videoUri = videoUri,
                 fechaGuardado = LocalDate.now().format(FORMATO_FECHA),
@@ -754,6 +755,24 @@ class AuthState(
             )
         )
         misGrabaciones = repo.grabacionesDeUsuario(u.id)
+        return id
+    }
+
+    /** Guarda los momentos con posibles goles encontrados en el audio de la grabación [id]. */
+    fun guardarMarcasPosibles(id: String, marcas: List<Long>) {
+        val g = grabacionPorId(id) ?: return
+        repo.guardarMarcasPosibles(g.id, marcas.sorted())
+        misGrabaciones = repo.grabacionesDeUsuario(g.usuarioId)
+    }
+
+    /** Guarda los goles confirmados por el usuario (y con ellos el marcador del partido). */
+    fun guardarMarcador(id: String, goles: List<Gol>) {
+        val g = grabacionPorId(id) ?: return
+        repo.guardarMarcador(
+            g.id,
+            goles.filter { it.equipo == 1 || it.equipo == 2 }.sortedBy { it.tiempoMs }
+        )
+        misGrabaciones = repo.grabacionesDeUsuario(g.usuarioId)
     }
 
     // ---------------------------------------------------------------

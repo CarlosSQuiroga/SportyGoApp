@@ -60,6 +60,15 @@ object Routes {
     fun reproducir(grabacionId: String, momento: Boolean = false) =
         "$REPRODUCIR/$grabacionId?$ARG_MOMENTO=$momento"
 
+    // Confirmar los goles detectados en el audio de una grabación
+    const val CONFIRMAR_GOLES = "confirmar_goles"
+    /** alGrabar=true: se abrió al detener la grabación (al terminar se va a "Grabaciones"). */
+    const val ARG_AL_GRABAR = "alGrabar"
+    const val CONFIRMAR_GOLES_PATRON =
+        "$CONFIRMAR_GOLES/{$ARG_GRABACION_ID}?$ARG_AL_GRABAR={$ARG_AL_GRABAR}"
+    fun confirmarGoles(grabacionId: String, alGrabar: Boolean = false) =
+        "$CONFIRMAR_GOLES/$grabacionId?$ARG_AL_GRABAR=$alGrabar"
+
     // Chat jugador-dueño de una cancha
     const val CHAT = "chat"
     const val ARG_JUGADOR_ID = "jugadorId"

@@ -385,7 +385,19 @@ object NubeDatos {
         nombreEquipo = d.texto("nombreEquipo"),
         rivalId = d.texto("rivalId"),
         nombreRival = d.texto("nombreRival"),
-        nombre = d.texto("nombre")
+        nombre = d.texto("nombre"),
+        audioAnalizado = d.getBoolean("audioAnalizado") ?: false,
+        marcasPosibles = (d.get("marcasPosibles") as? List<*>).orEmpty()
+            .mapNotNull { (it as? Number)?.toLong() },
+        // Un gol dañado no invalida la grabación completa.
+        goles = (d.get("goles") as? List<*>).orEmpty().mapNotNull { m ->
+            val mapa = m as? Map<*, *> ?: return@mapNotNull null
+            val tiempo = (mapa["tiempoMs"] as? Number)?.toLong() ?: return@mapNotNull null
+            val equipo = (mapa["equipo"] as? Number)?.toInt()?.takeIf { it == 1 || it == 2 }
+                ?: return@mapNotNull null
+            Gol(tiempo, equipo)
+        }.sortedBy { it.tiempoMs },
+        marcadorConfirmado = d.getBoolean("marcadorConfirmado") ?: false
     )
 
     private fun escribirGrabacion(g: Grabacion) = mapOf(
@@ -399,7 +411,11 @@ object NubeDatos {
         "nombreEquipo" to g.nombreEquipo,
         "rivalId" to g.rivalId,
         "nombreRival" to g.nombreRival,
-        "nombre" to g.nombre
+        "nombre" to g.nombre,
+        "audioAnalizado" to g.audioAnalizado,
+        "marcasPosibles" to g.marcasPosibles,
+        "goles" to g.goles.map { mapOf("tiempoMs" to it.tiempoMs, "equipo" to it.equipo) },
+        "marcadorConfirmado" to g.marcadorConfirmado
     )
 
     private fun leerNotificacion(d: DocumentSnapshot) = Notificacion(

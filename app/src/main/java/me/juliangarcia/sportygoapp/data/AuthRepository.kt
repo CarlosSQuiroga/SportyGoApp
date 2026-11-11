@@ -259,6 +259,21 @@ class AuthRepository(private val nube: NubeDatos = NubeDatos) {
 
     fun eliminarGrabacion(id: String) = nube.grabaciones.borrar(id)
 
+    fun guardarMarcasPosibles(id: String, marcas: List<Long>) =
+        nube.grabaciones.actualizar(
+            id,
+            mapOf("audioAnalizado" to true, "marcasPosibles" to marcas)
+        ) { it.copy(audioAnalizado = true, marcasPosibles = marcas) }
+
+    fun guardarMarcador(id: String, goles: List<Gol>) =
+        nube.grabaciones.actualizar(
+            id,
+            mapOf(
+                "goles" to goles.map { mapOf("tiempoMs" to it.tiempoMs, "equipo" to it.equipo) },
+                "marcadorConfirmado" to true
+            )
+        ) { it.copy(goles = goles, marcadorConfirmado = true) }
+
     fun reservasSinGrabar(): Set<String> =
         nube.reservas.todos.filter { it.sinGrabar }.map { it.id }.toSet()
 

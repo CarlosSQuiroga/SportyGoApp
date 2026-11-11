@@ -339,7 +339,8 @@ private fun GrabacionCardItem(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                grabacion.enfrentamiento?.let {
+                // Con el marcador confirmado se muestra el resultado ("A 2 – 1 B").
+                (grabacion.marcador ?: grabacion.enfrentamiento)?.let {
                     Text(
                         text = it,
                         fontSize = 14.sp,

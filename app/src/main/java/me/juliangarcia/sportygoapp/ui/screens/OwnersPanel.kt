@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -74,6 +75,9 @@ fun OwnersPanelScreen(
     reservasHoySubtexto: String = "0 hoy",
     // Proporción (0..1) de ingresos de cada día de la semana actual, de lunes a domingo.
     ingresosSemana: List<Pair<String, Float>> = listOf("L", "M", "M", "J", "V", "S", "D").map { it to 0f },
+    // Proporción (0..1) de ingresos de cada día del mes actual (1 al último día). La etiqueta
+    // puede ir vacía para no saturar el eje.
+    ingresosMes: List<Pair<String, Float>> = emptyList(),
     filtroIngresosTab: String = "Semana",
     tabBottomActual: String = "Inicio",
     hayNotificacionesSinLeer: Boolean = false,
@@ -370,7 +374,7 @@ fun OwnersPanelScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text(
-                            text = "Ingresos por semana",
+                            text = if (filtroIngresosTab == "Mes") "Ingresos del mes" else "Ingresos por semana",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextWhite
@@ -427,7 +431,7 @@ fun OwnersPanelScreen(
 
                         // Gráfico de Barras de Ingresos
                         IngresosBarChart(
-                            diasConValores = ingresosSemana
+                            diasConValores = if (filtroIngresosTab == "Mes") ingresosMes else ingresosSemana
                         )
                     }
                 }
@@ -594,6 +598,8 @@ private fun IngresosBarChart(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Bottom
     ) {
+        // Con muchas barras (vista de mes) se hacen más finas para que quepan todos los días.
+        val muchas = diasConValores.size > 7
         diasConValores.forEach { (dia, porcentaje) ->
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -602,9 +608,14 @@ private fun IngresosBarChart(
             ) {
                 Box(
                     modifier = Modifier
-                        .width(22.dp)
+                        .then(if (muchas) Modifier.fillMaxWidth(0.7f) else Modifier.width(22.dp))
                         .fillMaxHeight(porcentaje.coerceIn(0f, 1.0f))
-                        .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                        .clip(
+                            RoundedCornerShape(
+                                topStart = if (muchas) 2.dp else 6.dp,
+                                topEnd = if (muchas) 2.dp else 6.dp
+                            )
+                        )
                         .background(PrimaryGreen)
                 )
 
@@ -612,8 +623,12 @@ private fun IngresosBarChart(
 
                 Text(
                     text = dia,
-                    fontSize = 12.sp,
-                    color = TextSecondary
+                    fontSize = if (muchas) 10.sp else 12.sp,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    softWrap = false,
+                    // Deja que el número del día sobresalga de su columna estrecha sin cortarse.
+                    modifier = Modifier.wrapContentWidth(unbounded = true)
                 )
             }
         }

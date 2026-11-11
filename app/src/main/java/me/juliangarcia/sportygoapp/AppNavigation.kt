@@ -247,6 +247,7 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                     reservasCount = resumen.totalReservas.toString(),
                     reservasHoySubtexto = "${resumen.reservasHoy.size} hoy",
                     ingresosSemana = resumen.barrasSemana,
+                    ingresosMes = resumen.barrasMes,
                     filtroIngresosTab = filtroIngresos,
                     onFiltroIngresosTabClick = { filtroIngresos = it },
                     onInventarioClick = { navController.irA(Routes.INVENTARY_OWNER) },
@@ -834,7 +835,8 @@ private class ResumenDuenio(
     val totalReservas: Int,
     val ingresosSemana: Int,
     val ingresosMes: Int,
-    val barrasSemana: List<Pair<String, Float>>
+    val barrasSemana: List<Pair<String, Float>>,
+    val barrasMes: List<Pair<String, Float>>
 )
 
 private fun resumenDuenio(reservas: List<Reserva>): ResumenDuenio {
@@ -864,24 +866,31 @@ private fun resumenDuenio(reservas: List<Reserva>): ResumenDuenio {
         }
     }
 
-    // Ingresos (cancha + productos del kiosco) por día de la semana actual (lunes a domingo).
+    // Ingresos (cancha + productos del kiosco) por día de la semana actual (lunes a domingo)
+    // y por día del mes actual (del 1 al último día).
     val porDia = IntArray(7)
-    var ingresosMes = 0
+    val porDiaMes = IntArray(hoy.lengthOfMonth())
     reservas.forEach { r ->
         val f = diaDelPago(r) ?: return@forEach
         if (!f.isBefore(lunes) && f.isBefore(lunes.plusDays(7))) {
             porDia[f.dayOfWeek.value - 1] += r.total
         }
-        if (f.year == hoy.year && f.month == hoy.month) ingresosMes += r.total
+        if (f.year == hoy.year && f.month == hoy.month) porDiaMes[f.dayOfMonth - 1] += r.total
     }
     val maximo = porDia.maxOrNull()?.takeIf { it > 0 } ?: 1
+    val maximoMes = porDiaMes.maxOrNull()?.takeIf { it > 0 } ?: 1
     val letras = listOf("L", "M", "M", "J", "V", "S", "D")
 
     return ResumenDuenio(
         reservasHoy = deHoy,
         totalReservas = reservas.size,
         ingresosSemana = porDia.sum(),
-        ingresosMes = ingresosMes,
-        barrasSemana = letras.mapIndexed { i, l -> l to porDia[i].toFloat() / maximo }
+        ingresosMes = porDiaMes.sum(),
+        barrasSemana = letras.mapIndexed { i, l -> l to porDia[i].toFloat() / maximo },
+        // Se rotulan el día 1 y cada 5 días para que los números no se amontonen.
+        barrasMes = porDiaMes.mapIndexed { i, v ->
+            val dia = i + 1
+            (if (dia == 1 || dia % 5 == 0) dia.toString() else "") to v.toFloat() / maximoMes
+        }
     )
 }

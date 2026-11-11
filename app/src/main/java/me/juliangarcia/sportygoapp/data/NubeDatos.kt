@@ -29,7 +29,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  - usuarios/{uid}          perfil público de cada cuenta (la contraseña la maneja Firebase Auth)
  *  - nombresUsuario/{nombre} nombre en minúsculas -> uid y correo (login con nombre de usuario)
  *  - canchas/{id}, productos/{id}, equipos/{id}, reservas/{id}
- *  - grabaciones/{id}        solo se descargan las del usuario en sesión
+ *  - grabaciones/{id}        las del usuario en sesión y las hechas en su cancha (dueño)
  *  - notificaciones/{id}     solo se descargan las del usuario en sesión
  *  - mensajes/{id}           chat jugador-dueño; solo los de los chats del usuario en sesión
  */
@@ -53,6 +53,8 @@ object NubeDatos {
     val equipos = Coleccion("equipos", ::leerEquipo, ::escribirEquipo)
     val reservas = Coleccion("reservas", ::leerReserva, ::escribirReserva)
     val grabaciones = Coleccion("grabaciones", ::leerGrabacion, ::escribirGrabacion)
+    /** Grabaciones que los jugadores hicieron en la cancha del usuario en sesión (dueño). */
+    val grabacionesDeMiCancha = Coleccion("grabaciones", ::leerGrabacion, ::escribirGrabacion)
     val notificaciones = Coleccion("notificaciones", ::leerNotificacion, ::escribirNotificacion)
     val mensajes = Coleccion("mensajes", ::leerMensaje, ::escribirMensaje)
 
@@ -75,6 +77,7 @@ object NubeDatos {
             equipos.escuchar(db.collection("equipos")),
             reservas.escuchar(db.collection("reservas")),
             grabaciones.escuchar(db.collection("grabaciones").whereEqualTo("usuarioId", uid)),
+            grabacionesDeMiCancha.escuchar(db.collection("grabaciones").whereEqualTo("duenioId", uid)),
             notificaciones.escuchar(db.collection("notificaciones").whereEqualTo("usuarioId", uid)),
             // Chats: solo los mensajes de las conversaciones en las que participa.
             mensajes.escuchar(db.collection("mensajes").whereArrayContains("participantes", uid))
@@ -87,8 +90,10 @@ object NubeDatos {
         escuchas.forEach { it.remove() }
         escuchas.clear()
         uidEscuchado = null
-        listOf(usuarios, canchas, productos, equipos, reservas, grabaciones, notificaciones, mensajes)
-            .forEach { it.limpiar() }
+        listOf(
+            usuarios, canchas, productos, equipos, reservas, grabaciones, grabacionesDeMiCancha,
+            notificaciones, mensajes
+        ).forEach { it.limpiar() }
     }
 
     /**
@@ -217,6 +222,32 @@ object NubeDatos {
             }
             .addOnSuccessListener { alSubir(it.toString()) }
             .addOnFailureListener { Log.w(TAG, "No se pudo subir la imagen a $ruta", it) }
+    }
+
+    /**
+     * Sube a Cloud Storage el video de un partido y entrega su URL con [alSubir] (o null si
+     * falló, p. ej. sin red o con Storage desactivado; se reintenta al volver a abrir la app).
+     */
+    fun subirVideo(archivo: java.io.File, ruta: String, alSubir: (String?) -> Unit) {
+        val ref = storage.reference.child(ruta)
+        ref.putFile(Uri.fromFile(archivo), storageMetadata { contentType = "video/mp4" })
+            .continueWithTask { tarea ->
+                tarea.exception?.let { throw it }
+                ref.downloadUrl
+            }
+            .addOnSuccessListener { alSubir(it.toString()) }
+            .addOnFailureListener {
+                Log.w(TAG, "No se pudo subir el video a $ruta", it)
+                alSubir(null)
+            }
+    }
+
+    /** Borra un archivo de Cloud Storage a partir de su URL de descarga. */
+    fun borrarArchivo(url: String) {
+        runCatching { storage.getReferenceFromUrl(url).delete() }
+            .onFailure { Log.w(TAG, "URL de Storage inválida: $url", it) }
+            .getOrNull()
+            ?.addOnFailureListener { Log.w(TAG, "No se pudo borrar $url", it) }
     }
 
     // ---------------------------------------------------------------
@@ -381,6 +412,9 @@ object NubeDatos {
         horaReserva = d.texto("horaReserva"),
         nombreCancha = d.texto("nombreCancha"),
         reservaId = d.texto("reservaId"),
+        canchaId = d.texto("canchaId"),
+        duenioId = d.texto("duenioId"),
+        videoUrl = d.texto("videoUrl"),
         equipoId = d.texto("equipoId"),
         nombreEquipo = d.texto("nombreEquipo"),
         rivalId = d.texto("rivalId"),
@@ -407,6 +441,9 @@ object NubeDatos {
         "horaReserva" to g.horaReserva,
         "nombreCancha" to g.nombreCancha,
         "reservaId" to g.reservaId,
+        "canchaId" to g.canchaId,
+        "duenioId" to g.duenioId,
+        "videoUrl" to g.videoUrl,
         "equipoId" to g.equipoId,
         "nombreEquipo" to g.nombreEquipo,
         "rivalId" to g.rivalId,

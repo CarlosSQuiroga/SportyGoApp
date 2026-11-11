@@ -62,10 +62,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Grabaciones: privadas de cada usuario.
+    // Grabaciones: las maneja el jugador que grabó. El dueño de la cancha donde se jugó la
+    // reserva también la puede ver (solo leer). duenioId debe ser el dueño real de la cancha.
     match /grabaciones/{grabacionId} {
-      allow read, update, delete: if logueado() && resource.data.usuarioId == request.auth.uid;
-      allow create: if logueado() && nuevo().usuarioId == request.auth.uid;
+      function duenioValido(d) {
+        return d.get('duenioId', '') == ''
+          || get(/databases/$(database)/documents/canchas/$(d.canchaId)).data.ownerId
+             == d.duenioId;
+      }
+      allow read: if logueado() && (resource.data.usuarioId == request.auth.uid
+                    || resource.data.get('duenioId', '') == request.auth.uid);
+      allow update: if logueado() && resource.data.usuarioId == request.auth.uid
+                    && nuevo().usuarioId == resource.data.usuarioId
+                    && duenioValido(nuevo());
+      allow delete: if logueado() && resource.data.usuarioId == request.auth.uid;
+      allow create: if logueado() && nuevo().usuarioId == request.auth.uid
+                    && duenioValido(nuevo());
     }
 
     // Chat jugador-dueño: solo los dos participantes leen la conversación. El autor debe ser

@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import me.juliangarcia.sportygoapp.data.AuthState
 import me.juliangarcia.sportygoapp.data.DetectorGoles
 import me.juliangarcia.sportygoapp.data.Grabacion
+import me.juliangarcia.sportygoapp.data.UserRole
 import me.juliangarcia.sportygoapp.ui.screens.ConfirmarGolesScreen
 import me.juliangarcia.sportygoapp.data.VideosCompartidos
 import me.juliangarcia.sportygoapp.ui.screens.EliminarGrabacionDialog
@@ -37,7 +38,26 @@ fun GrabacionesRoute(
     var aRenombrar by remember { mutableStateOf<Grabacion?>(null) }
     var aEliminar by remember { mutableStateOf<Grabacion?>(null) }
 
+    // El dueño ve los partidos que los anfitriones de las reservas grabaron en su cancha.
+    if (auth.usuario?.rol == UserRole.DUENIO) {
+        RecordVideoScreen(
+            soloLectura = true,
+            titulo = "Grabaciones de tu cancha",
+            grabaciones = auth.grabacionesDeMiCancha,
+            textoVacio = "Aún no hay grabaciones",
+            descripcionVacio = "Cuando un jugador grabe su partido en tu cancha, el video te llegará aquí.",
+            notaFooter = "Los anfitriones de las reservas graban sus partidos y el video te llega automáticamente.",
+            autorDe = { g -> auth.nombreDeUsuario(g.usuarioId) },
+            onBackClick = onBackClick,
+            onGrabacionClick = onVerGrabacion,
+            onBottomNavTabClick = onBottomNavTabClick
+        )
+        return
+    }
+
     RecordVideoScreen(
+        notaFooter = "Revive tus mejores jugadas y comparte los momentos destacados de tus " +
+            "partidos. Los videos de tus reservas también le llegan al dueño de la cancha.",
         tabSeleccionada = tabActual,
         grabaciones = auth.misGrabaciones,
         onBackClick = onBackClick,
@@ -78,7 +98,19 @@ fun ReproducirGrabacionRoute(
     val grabacion = auth.misGrabaciones.firstOrNull { it.id == grabacionId }
         ?: auth.grabacionPorId(grabacionId)
     if (grabacion == null) {
-        LaunchedEffect(Unit) { onBackClick() }
+        // Dueño de la cancha: solo puede ver el video que le llegó desde la nube.
+        val deMiCancha = auth.grabacionDeMiCanchaPorId(grabacionId)
+        if (deMiCancha == null) {
+            LaunchedEffect(Unit) { onBackClick() }
+        } else {
+            ReproducirGrabacionScreen(
+                grabacion = deMiCancha,
+                onBackClick = onBackClick,
+                videoDisponible = false,
+                fuenteVideo = deMiCancha.videoUrl,
+                soloLectura = true
+            )
+        }
         return
     }
 
@@ -92,6 +124,9 @@ fun ReproducirGrabacionRoute(
         grabacion = grabacion,
         onBackClick = onBackClick,
         videoDisponible = archivo != null,
+        // Si se grabó en otro teléfono, se ve desde la nube.
+        fuenteVideo = grabacion.videoUri.takeIf { archivo != null }
+            ?: grabacion.videoUrl.ifBlank { null },
         duracionInicialMs = duracion,
         abrirEnMomentoClave = abrirEnMomentoClave,
         preparandoClip = preparando,

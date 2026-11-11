@@ -3,11 +3,26 @@
 //
 // Las imágenes se guardan en <carpeta>/<uid del dueño>/<archivo>
 // (usuarios, canchas, productos, equipos). Cada usuario solo escribe en su carpeta.
+//
+// Los videos de los partidos se guardan en grabaciones/<uid del jugador>/<id de la grabación>.
+// Los ve el jugador que grabó y el dueño de la cancha (según el documento en Firestore).
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    match /grabaciones/{uid}/{grabacionId} {
+      allow read: if request.auth != null
+                  && (request.auth.uid == uid
+                      || firestore.get(/databases/(default)/documents/grabaciones/$(grabacionId))
+                           .data.get('duenioId', '') == request.auth.uid);
+      allow delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.size < 8 * 1024 * 1024 * 1024
+                   && request.resource.contentType == 'video/mp4';
+    }
+
     match /{carpeta}/{uid}/{archivo} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && carpeta != 'grabaciones';
       allow write: if request.auth != null
                    && request.auth.uid == uid
                    && carpeta in ['usuarios', 'canchas', 'productos', 'equipos']

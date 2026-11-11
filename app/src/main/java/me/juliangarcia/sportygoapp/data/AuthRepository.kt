@@ -251,8 +251,24 @@ class AuthRepository(private val nube: NubeDatos = NubeDatos) {
     fun reservaYaGrabada(reservaId: String): Boolean =
         nube.grabaciones.todos.any { it.reservaId == reservaId }
 
-    /** Los videos se quedan en el teléfono que grabó; en la nube solo se guarda el registro. */
+    /**
+     * Guarda el registro de la grabación. El video se graba en el teléfono y luego se sube a
+     * Cloud Storage (ver [asignarVideo]) para que también le llegue al dueño de la cancha.
+     */
     fun guardarGrabacion(grabacion: Grabacion) = nube.grabaciones.guardar(grabacion.id, grabacion)
+
+    /** Video ya subido a la nube: queda disponible para el dueño de la cancha [duenioId]. */
+    fun asignarVideo(id: String, canchaId: String, duenioId: String, videoUrl: String) =
+        nube.grabaciones.actualizar(
+            id,
+            mapOf("canchaId" to canchaId, "duenioId" to duenioId, "videoUrl" to videoUrl)
+        ) { it.copy(canchaId = canchaId, duenioId = duenioId, videoUrl = videoUrl) }
+
+    /** Grabaciones que los jugadores hicieron en las canchas del dueño [duenioId]. */
+    fun grabacionesDeCancha(duenioId: String): List<Grabacion> =
+        nube.grabacionesDeMiCancha.todos.filter { it.duenioId == duenioId }
+
+    fun grabacionDeCanchaPorId(id: String): Grabacion? = nube.grabacionesDeMiCancha[id]
 
     fun renombrarGrabacion(id: String, nombre: String) =
         nube.grabaciones.actualizar(id, mapOf("nombre" to nombre)) { it.copy(nombre = nombre) }

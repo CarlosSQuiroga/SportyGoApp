@@ -82,8 +82,15 @@ private const val MIN_MOMENTO_MS = 1_000L
 fun ReproducirGrabacionScreen(
     grabacion: Grabacion,
     onBackClick: () -> Unit,
-    /** false si el video no está en este teléfono (se grabó en otro). */
+    /** false si el video no está en este teléfono (se grabó en otro): no se puede recortar ni compartir. */
     videoDisponible: Boolean = true,
+    /**
+     * Lo que se reproduce: el archivo de este teléfono o, si no está aquí, el video en la nube.
+     * null = no hay video que mostrar.
+     */
+    fuenteVideo: String? = grabacion.videoUri.takeIf { videoDisponible },
+    /** Dueño de la cancha: solo ve el video (sin compartir, goles, renombrar ni eliminar). */
+    soloLectura: Boolean = false,
     /** Duración del video (ms) leída del archivo; se usa hasta que el reproductor la tenga. */
     duracionInicialMs: Long = 0L,
     /** true = abrir directamente el modo "momento clave". */
@@ -108,7 +115,7 @@ fun ReproducirGrabacionScreen(
                 if (mp.duration > 0) duracionMs = mp.duration.toLong()
                 start()
             }
-            if (videoDisponible) setVideoURI(Uri.parse(grabacion.videoUri))
+            if (fuenteVideo != null) setVideoURI(Uri.parse(fuenteVideo))
         }
     }
     DisposableEffect(Unit) { onDispose { videoView.stopPlayback() } }
@@ -198,7 +205,7 @@ fun ReproducirGrabacionScreen(
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            if (videoDisponible) {
+            if (fuenteVideo != null) {
                 AndroidView(factory = { videoView })
             } else {
                 Column(
@@ -385,7 +392,7 @@ fun ReproducirGrabacionScreen(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
                                         .background(ButtonBackground)
-                                        .clickable(enabled = videoDisponible) {
+                                        .clickable(enabled = fuenteVideo != null) {
                                             videoView.seekTo(
                                                 (gol.tiempoMs - 8_000L).coerceAtLeast(0L).toInt()
                                             )
@@ -412,7 +419,7 @@ fun ReproducirGrabacionScreen(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                 }
-                Row(
+                if (!soloLectura) Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {

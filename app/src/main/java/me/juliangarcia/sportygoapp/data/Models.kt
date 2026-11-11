@@ -102,6 +102,11 @@ data class Grabacion(
     val nombreCancha: String = "",
     /** Reserva en la que se grabó (vacío = grabaciones antiguas sin reserva asociada). */
     val reservaId: String = "",
+    /** Cancha de la reserva y su dueño: a él también le llega el video. Vacío = sin cancha. */
+    val canchaId: String = "",
+    val duenioId: String = "",
+    /** URL del video en Cloud Storage. Vacío = aún no se sube (solo está en el teléfono). */
+    val videoUrl: String = "",
     /** Equipo que hizo la reserva (vacío = sin equipo). El nombre se copia al grabar. */
     val equipoId: String = "",
     val nombreEquipo: String = "",
@@ -175,6 +180,8 @@ enum class EstadoReserva { PENDIENTE_PAGO, CONFIRMADA, RECHAZADA }
 enum class TipoNotificacion {
     CUENTA_CREADA, VINCULAR_NEQUI, PAGO_PENDIENTE, PAGO_RECHAZADO,
     RESERVA_HECHA, RESERVA_RECIBIDA, PEDIDO_RECIBIDO, GRABAR_PARTIDO,
+    /** Al dueño: un jugador grabó un partido en su cancha y el video ya está en la nube. */
+    GRABACION_RECIBIDA,
     /** Mensaje nuevo en el chat (solo sale en el teléfono, no se guarda en la bandeja). */
     MENSAJE_NUEVO
 }

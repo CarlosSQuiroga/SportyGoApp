@@ -81,7 +81,17 @@ fun RecordVideoScreen(
     onMomentoClaveClick: (Grabacion) -> Unit = {},
     onRenombrarClick: (Grabacion) -> Unit = {},
     onEliminarClick: (Grabacion) -> Unit = {},
-    onBottomNavTabClick: (String) -> Unit = {}
+    onBottomNavTabClick: (String) -> Unit = {},
+    /**
+     * Dueño de cancha: ve las grabaciones que los jugadores hicieron en su cancha, sin
+     * pestañas ni menú (no puede renombrarlas ni borrarlas).
+     */
+    soloLectura: Boolean = false,
+    titulo: String = "Grabaciones",
+    textoVacio: String = "Aún no tienes grabaciones",
+    descripcionVacio: String = "Las grabaciones de tus partidos aparecerán aquí.",
+    /** Quién grabó cada video (se muestra como "Grabado por ..."; null = no se muestra). */
+    autorDe: (Grabacion) -> String? = { null }
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -119,7 +129,7 @@ fun RecordVideoScreen(
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Text(
-                        text = "Grabaciones",
+                        text = titulo,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextWhite
@@ -129,7 +139,7 @@ fun RecordVideoScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Selector de pestañas (Mis partidos / Todos)
-                Row(
+                if (!soloLectura) Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(50))
@@ -173,7 +183,7 @@ fun RecordVideoScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                if (!soloLectura) Spacer(modifier = Modifier.height(16.dp))
 
                 // Lista de Grabaciones
                 LazyColumn(
@@ -186,8 +196,8 @@ fun RecordVideoScreen(
                         item {
                             EstadoVacio(
                                 icono = Icons.Outlined.VideoLibrary,
-                                titulo = "Aún no tienes grabaciones",
-                                descripcion = "Las grabaciones de tus partidos aparecerán aquí."
+                                titulo = textoVacio,
+                                descripcion = descripcionVacio
                             )
                         }
                     }
@@ -198,6 +208,8 @@ fun RecordVideoScreen(
                     ) { grabacion ->
                         GrabacionCardItem(
                             grabacion = grabacion,
+                            soloLectura = soloLectura,
+                            autor = autorDe(grabacion),
                             onClick = { onGrabacionClick(grabacion) },
                             onCompartirClick = { onCompartirClick(grabacion) },
                             onMomentoClaveClick = { onMomentoClaveClick(grabacion) },
@@ -265,6 +277,8 @@ fun RecordVideoScreen(
 @Composable
 private fun GrabacionCardItem(
     grabacion: Grabacion,
+    soloLectura: Boolean,
+    autor: String?,
     onClick: () -> Unit,
     onCompartirClick: () -> Unit,
     onMomentoClaveClick: () -> Unit,
@@ -358,6 +372,16 @@ private fun GrabacionCardItem(
                     color = TextSecondary
                 )
 
+                autor?.let {
+                    Text(
+                        text = "Grabado por $it",
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Enlace / Acción "Ver grabación"
@@ -382,8 +406,8 @@ private fun GrabacionCardItem(
                 }
             }
 
-            // Menú de opciones del video
-            Box {
+            // Menú de opciones del video (el dueño solo puede verlo)
+            if (!soloLectura) Box {
                 IconButton(onClick = { menuAbierto = true }) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,

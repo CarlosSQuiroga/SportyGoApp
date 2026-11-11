@@ -54,6 +54,16 @@ class AuthState(
     var misGrabaciones: List<Grabacion> by mutableStateOf(emptyList())
         private set
 
+    /**
+     * Grabaciones que los anfitriones de las reservas hicieron en la cancha del dueño en
+     * sesión (solo las que ya terminaron de subirse a la nube), la más reciente primero.
+     */
+    var grabacionesDeMiCancha: List<Grabacion> by mutableStateOf(emptyList())
+        private set
+
+    /** Grabaciones cuyo video se está subiendo ahora (para no subirlo dos veces). */
+    private val subiendoVideos = mutableSetOf<String>()
+
     /** Reservas que otros jugadores hicieron en la cancha del dueño en sesión. */
     var reservasDeMiCancha: List<Reserva> by mutableStateOf(emptyList())
         private set
@@ -104,6 +114,7 @@ class AuthState(
     private fun alEntrar() {
         recargarDatosDeUsuario()
         avisos?.reprogramar(misReservas)
+        subirVideosPendientes()
     }
 
     /**
@@ -120,6 +131,7 @@ class AuthState(
             cancha = null
             misReservas = emptyList()
             misGrabaciones = emptyList()
+            grabacionesDeMiCancha = emptyList()
             reservasDeMiCancha = emptyList()
             misNotificaciones = emptyList()
             misProductos = emptyList()
@@ -136,6 +148,15 @@ class AuthState(
         misProductos = cancha?.let { productosDeCancha(it.id) } ?: emptyList()
         misReservas = repo.reservasDeUsuario(u.id)
         misGrabaciones = repo.grabacionesDeUsuario(u.id)
+        grabacionesDeMiCancha = if (u.rol == UserRole.DUENIO) {
+            repo.grabacionesDeCancha(u.id)
+                .filter { it.videoUrl.isNotBlank() }
+                .sortedWith(
+                    compareByDescending<Grabacion> {
+                        runCatching { LocalDate.parse(it.fechaGuardado, FORMATO_FECHA) }.getOrNull()
+                    }.thenByDescending { Validaciones.minutosDelDia(it.horaReserva) }
+                )
+        } else emptyList()
         // El dueño solo cuenta las reservas pagadas.
         reservasDeMiCancha = cancha?.let { c ->
             repo.reservasDeCancha(c.id).filter { it.estado == EstadoReserva.CONFIRMADA }
@@ -739,23 +760,72 @@ class AuthState(
         val equipo = reserva.equipoId.takeIf { it.isNotBlank() }?.let { repo.equipoPorId(it) }
         val rival = rivalId?.let { repo.equipoPorId(it) }
         val id = UUID.randomUUID().toString()
-        repo.guardarGrabacion(
-            Grabacion(
-                id = id,
-                usuarioId = u.id,
-                videoUri = videoUri,
-                fechaGuardado = LocalDate.now().format(FORMATO_FECHA),
-                horaReserva = reserva.hora,
-                nombreCancha = reserva.nombreCancha,
-                reservaId = reserva.id,
-                equipoId = reserva.equipoId,
-                nombreEquipo = equipo?.nombre ?: reserva.nombreEquipo,
-                rivalId = rival?.id.orEmpty(),
-                nombreRival = rival?.nombre.orEmpty()
-            )
+        val grabacion = Grabacion(
+            id = id,
+            usuarioId = u.id,
+            videoUri = videoUri,
+            fechaGuardado = LocalDate.now().format(FORMATO_FECHA),
+            horaReserva = reserva.hora,
+            nombreCancha = reserva.nombreCancha,
+            reservaId = reserva.id,
+            equipoId = reserva.equipoId,
+            nombreEquipo = equipo?.nombre ?: reserva.nombreEquipo,
+            rivalId = rival?.id.orEmpty(),
+            nombreRival = rival?.nombre.orEmpty()
         )
+        repo.guardarGrabacion(grabacion)
         misGrabaciones = repo.grabacionesDeUsuario(u.id)
+        // El video también le llega al dueño de la cancha: se sube a la nube en segundo plano.
+        subirVideo(grabacion)
         return id
+    }
+
+    /**
+     * Sube los videos de las reservas que aún no están en la nube (los grabados antes de
+     * esta función o cuya subida se cortó, p. ej. sin red o al cerrar la app).
+     */
+    private fun subirVideosPendientes() {
+        val u = usuario ?: return
+        if (u.rol != UserRole.JUGADOR) return
+        repo.grabacionesDeUsuario(u.id)
+            .filter { it.videoUrl.isBlank() && it.reservaId.isNotBlank() }
+            .forEach { subirVideo(it) }
+    }
+
+    /**
+     * Sube el video de [g] a Cloud Storage y lo asigna al dueño de la cancha de la reserva.
+     * Si el video no está en este teléfono, se intentará desde el teléfono que lo grabó.
+     */
+    private fun subirVideo(g: Grabacion) {
+        val archivo = archivoDeVideo(g) ?: return
+        val reserva = repo.reservaPorId(g.reservaId) ?: return
+        val c = repo.canchaPorId(reserva.canchaId) ?: return
+        if (c.ownerId == g.usuarioId || !subiendoVideos.add(g.id)) return
+
+        NubeDatos.subirVideo(archivo, "grabaciones/${g.usuarioId}/${g.id}") { url ->
+            subiendoVideos -= g.id
+            if (url == null) return@subirVideo
+            // Si la borraron (o se cerró la sesión) mientras subía, el video ya no se usa.
+            if (usuario?.id != g.usuarioId || repo.grabacionPorId(g.id) == null) {
+                NubeDatos.borrarArchivo(url)
+                return@subirVideo
+            }
+            repo.asignarVideo(g.id, c.id, c.ownerId, url)
+            misGrabaciones = repo.grabacionesDeUsuario(g.usuarioId)
+
+            val jugador = usuario?.nombreUsuario ?: "Un jugador"
+            val actual = repo.grabacionPorId(g.id) ?: g
+            notificar(
+                usuarioId = c.ownerId,
+                tipo = TipoNotificacion.GRABACION_RECIBIDA,
+                titulo = "Nuevo video de ${c.nombre}",
+                mensaje = buildString {
+                    append("$jugador grabó su partido del ${reserva.fecha} de ${reserva.rangoHoras}")
+                    actual.enfrentamiento?.let { append(" ($it)") }
+                    append(". Míralo en Grabaciones.")
+                }
+            )
+        }
     }
 
     /** Guarda los momentos con posibles goles encontrados en el audio de la grabación [id]. */
@@ -827,16 +897,24 @@ class AuthState(
         return null
     }
 
-    /** Borra la grabación de la lista y su video de este teléfono. */
+    /**
+     * Borra la grabación de la lista, su video de este teléfono y el de la nube (así también
+     * desaparece de las grabaciones del dueño de la cancha).
+     */
     fun eliminarGrabacion(id: String) {
         val g = grabacionPorId(id) ?: return
         repo.eliminarGrabacion(g.id)
         archivoDeVideo(g)?.delete()
+        if (g.videoUrl.isNotBlank()) NubeDatos.borrarArchivo(g.videoUrl)
         misGrabaciones = repo.grabacionesDeUsuario(g.usuarioId)
     }
 
     fun grabacionPorId(id: String): Grabacion? =
         repo.grabacionPorId(id)?.takeIf { it.usuarioId == usuario?.id }
+
+    /** Grabación hecha por un jugador en la cancha del dueño en sesión (solo para verla). */
+    fun grabacionDeMiCanchaPorId(id: String): Grabacion? =
+        grabacionesDeMiCancha.firstOrNull { it.id == id }
 
     /** Horas ya reservadas (por cualquier jugador) en una cancha para una fecha. */
     fun horasOcupadas(canchaId: String, fecha: LocalDate): Set<String> {
@@ -863,8 +941,8 @@ class AuthState(
         val FORMATO_FECHA: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
 
         /**
-         * Archivo del video de [g] en este teléfono, o null si no está aquí (los videos se
-         * quedan en el teléfono que grabó; en la nube solo está el registro).
+         * Archivo del video de [g] en este teléfono, o null si no está aquí (el archivo queda
+         * en el teléfono que grabó; desde otros teléfonos se ve la copia de la nube, [Grabacion.videoUrl]).
          */
         fun archivoDeVideo(g: Grabacion): java.io.File? {
             val ruta = android.net.Uri.parse(g.videoUri).path ?: return null

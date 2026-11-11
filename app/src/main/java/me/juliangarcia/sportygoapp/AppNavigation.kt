@@ -460,6 +460,8 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                                 auth.reservaParaGrabar()?.let {
                                     navController.irA(Routes.grabarPartido(it.id))
                                 }
+                            TipoNotificacion.GRABACION_RECIBIDA ->
+                                navController.irA(Routes.RECORD_VIDEO)
                             TipoNotificacion.RESERVA_HECHA ->
                                 if (auth.usuario?.rol == UserRole.JUGADOR) {
                                     navController.irA(Routes.MY_RESERVE)
@@ -724,6 +726,7 @@ private fun Notificacion.aItem(): NotificacionItem {
         TipoNotificacion.RESERVA_RECIBIDA -> Icons.Outlined.CalendarToday to Color(0xFFE5B83B)
         TipoNotificacion.PEDIDO_RECIBIDO -> Icons.Outlined.Storefront to Color(0xFFA78BFA)
         TipoNotificacion.GRABAR_PARTIDO -> Icons.Outlined.Videocam to Color(0xFFE07048)
+        TipoNotificacion.GRABACION_RECIBIDA -> Icons.Outlined.Videocam to Color(0xFF64F089)
         TipoNotificacion.MENSAJE_NUEVO -> Icons.Outlined.ChatBubbleOutline to Color(0xFF63A0E8)
     }
     return NotificacionItem(

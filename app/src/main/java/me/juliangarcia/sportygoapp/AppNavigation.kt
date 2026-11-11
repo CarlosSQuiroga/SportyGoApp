@@ -237,8 +237,10 @@ fun SportyGoNavHost(auth: AuthState, nequi: NequiSimulado, modifier: Modifier = 
                     onNotificacionesClick = { navController.irA(Routes.NOTIFICATIONS) },
                     nombreCancha = auth.cancha?.nombre ?: "",
                     reservasHoy = resumen.reservasHoy,
-                    ingresosMonto = formatearPrecio(resumen.ingresosSemana),
-                    ingresosCambio = "Esta semana",
+                    ingresosMonto = formatearPrecio(
+                        if (filtroIngresos == "Mes") resumen.ingresosMes else resumen.ingresosSemana
+                    ),
+                    ingresosCambio = if (filtroIngresos == "Mes") "Este mes" else "Esta semana",
                     reservasCount = resumen.totalReservas.toString(),
                     reservasHoySubtexto = "${resumen.reservasHoy.size} hoy",
                     ingresosSemana = resumen.barrasSemana,
@@ -793,6 +795,7 @@ private class ResumenDuenio(
     val reservasHoy: List<ReservaHoyItem>,
     val totalReservas: Int,
     val ingresosSemana: Int,
+    val ingresosMes: Int,
     val barrasSemana: List<Pair<String, Float>>
 )
 
@@ -813,13 +816,25 @@ private fun resumenDuenio(reservas: List<Reserva>): ResumenDuenio {
             )
         }
 
-    // Ingresos por día de la semana actual (lunes a domingo).
-    val porDia = IntArray(7)
-    reservas.forEach { r ->
-        val f = fechaDe(r) ?: return@forEach
-        if (!f.isBefore(lunes) && f.isBefore(lunes.plusDays(7))) {
-            porDia[f.dayOfWeek.value - 1] += r.precio
+    // El dinero entra el día en que el jugador paga (no el día del partido). Las reservas
+    // antiguas, sin fecha de pago guardada, se cuentan por la fecha del partido.
+    val diaDelPago = { r: Reserva ->
+        if (r.pagadaEn > 0L) {
+            Instant.ofEpochMilli(r.pagadaEn).atZone(ZoneId.systemDefault()).toLocalDate()
+        } else {
+            fechaDe(r)
         }
+    }
+
+    // Ingresos (cancha + productos del kiosco) por día de la semana actual (lunes a domingo).
+    val porDia = IntArray(7)
+    var ingresosMes = 0
+    reservas.forEach { r ->
+        val f = diaDelPago(r) ?: return@forEach
+        if (!f.isBefore(lunes) && f.isBefore(lunes.plusDays(7))) {
+            porDia[f.dayOfWeek.value - 1] += r.total
+        }
+        if (f.year == hoy.year && f.month == hoy.month) ingresosMes += r.total
     }
     val maximo = porDia.maxOrNull()?.takeIf { it > 0 } ?: 1
     val letras = listOf("L", "M", "M", "J", "V", "S", "D")
@@ -828,6 +843,7 @@ private fun resumenDuenio(reservas: List<Reserva>): ResumenDuenio {
         reservasHoy = deHoy,
         totalReservas = reservas.size,
         ingresosSemana = porDia.sum(),
+        ingresosMes = ingresosMes,
         barrasSemana = letras.mapIndexed { i, l -> l to porDia[i].toFloat() / maximo }
     )
 }

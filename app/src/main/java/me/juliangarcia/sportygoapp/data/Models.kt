@@ -195,7 +195,9 @@ data class Reserva(
     val equipoId: String = "",
     val nombreEquipo: String = "",
     /** El anfitrión eligió "Ahora no": no se vuelve a abrir la cámara para esta reserva. */
-    val sinGrabar: Boolean = false
+    val sinGrabar: Boolean = false,
+    /** Momento en que se aceptó el pago (epoch millis). 0 = sin pagar o reserva antigua. */
+    val pagadaEn: Long = 0L
 ) {
     val totalProductos: Int get() = productos.sumOf { it.subtotal }
     val total: Int get() = precio + totalProductos

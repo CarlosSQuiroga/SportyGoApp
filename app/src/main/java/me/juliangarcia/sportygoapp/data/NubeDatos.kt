@@ -342,7 +342,8 @@ object NubeDatos {
             nequiDestino = d.texto("nequiDestino"),
             equipoId = d.texto("equipoId"),
             nombreEquipo = d.texto("nombreEquipo"),
-            sinGrabar = d.getBoolean("sinGrabar") ?: false
+            sinGrabar = d.getBoolean("sinGrabar") ?: false,
+            pagadaEn = d.largo("pagadaEn")
         )
     }
 
@@ -368,7 +369,8 @@ object NubeDatos {
         "nequiDestino" to r.nequiDestino,
         "equipoId" to r.equipoId,
         "nombreEquipo" to r.nombreEquipo,
-        "sinGrabar" to r.sinGrabar
+        "sinGrabar" to r.sinGrabar,
+        "pagadaEn" to r.pagadaEn
     )
 
     private fun leerGrabacion(d: DocumentSnapshot) = Grabacion(

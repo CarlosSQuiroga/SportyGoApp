@@ -13,11 +13,6 @@ sealed interface AuthResult {
     data class Exito(val usuario: User) : AuthResult
     data class Error(val mensaje: String) : AuthResult
 }
-
-/**
- * Cuentas (Firebase Authentication) y datos de la app (Firestore, ver [NubeDatos]).
- * Las lecturas son inmediatas: salen de la copia en memoria que NubeDatos mantiene al día.
- */
 class AuthRepository(private val nube: NubeDatos = NubeDatos) {
 
     /** uid de la sesión guardada por Firebase (sobrevive a cerrar la app), o null. */

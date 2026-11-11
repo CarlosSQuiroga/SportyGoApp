@@ -379,7 +379,11 @@ class AuthState(
     private fun idAvisoPago(reservaId: String) = "pago-$reservaId"
 
     private fun confirmarReserva(r: Reserva) {
-        val confirmada = r.copy(estado = EstadoReserva.CONFIRMADA)
+        // Se guarda cuándo se pagó: los ingresos del dueño se cuentan desde el día del pago.
+        val confirmada = r.copy(
+            estado = EstadoReserva.CONFIRMADA,
+            pagadaEn = System.currentTimeMillis()
+        )
         repo.actualizarReserva(confirmada)
         avisos?.quitar(idAvisoPago(r.id))
 

@@ -136,6 +136,38 @@ fun RegistrarUbicacionRoute(
         buscandoDireccion = false
     }
 
+    // Buscador de direcciones: al escribir, busca solo (tras una pausa) y muestra sugerencias.
+    var busqueda by remember { mutableStateOf("") }
+    var resultados by remember { mutableStateOf(emptyList<ResultadoDireccion>()) }
+    var buscandoResultados by remember { mutableStateOf(false) }
+    var sinResultados by remember { mutableStateOf(false) }
+    // Texto de la sugerencia elegida: no se vuelve a buscar al ponerlo en el campo.
+    var elegida by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(busqueda) {
+        resultados = emptyList()
+        sinResultados = false
+        val consulta = busqueda.trim()
+        if (consulta.length < 4 || consulta == elegida) {
+            buscandoResultados = false
+            return@LaunchedEffect
+        }
+        buscandoResultados = true
+        delay(700) // Espera a que deje de escribir.
+        val encontrados = buscarDirecciones(context, consulta, cerca = ubicacionUsuario.punto ?: centro)
+        resultados = encontrados
+        sinResultados = encontrados.isEmpty()
+        buscandoResultados = false
+    }
+
+    fun irAResultado(r: ResultadoDireccion) {
+        elegida = r.texto
+        busqueda = r.texto
+        resultados = emptyList()
+        tocado = true // Que la ubicación del usuario no lo mueva después.
+        destino = r.punto
+        recentrar++
+    }
+
     val texto = when {
         centro == null && ubicacionUsuario.buscando -> "Buscando tu ubicación..."
         centro == null -> "Mueve el mapa hasta tu cancha"
@@ -147,13 +179,29 @@ fun RegistrarUbicacionRoute(
     RegisterFieldScreen(
         direccionTexto = texto,
         puedeConfirmar = centro != null,
+        busqueda = busqueda,
+        onBusquedaChange = {
+            busqueda = it
+            if (it.trim() != elegida) elegida = null
+        },
+        sugerencias = resultados.map { it.texto },
+        estadoBusqueda = when {
+            buscandoResultados -> "Buscando dirección..."
+            sinResultados -> "No encontramos esa dirección. Prueba agregando la ciudad."
+            else -> null
+        },
+        onSugerenciaClick = { i -> resultados.getOrNull(i)?.let(::irAResultado) },
+        onBuscar = { resultados.firstOrNull()?.let(::irAResultado) },
         mapa = { m ->
             MapaSeleccion(
                 irA = destino,
                 recentrar = recentrar,
                 ubicacionUsuario = ubicacionUsuario.punto,
                 onCentroChange = { centro = it },
-                onToque = { tocado = true },
+                onToque = {
+                    tocado = true
+                    resultados = emptyList() // Al mover el mapa se cierran las sugerencias.
+                },
                 modifier = m
             )
         },

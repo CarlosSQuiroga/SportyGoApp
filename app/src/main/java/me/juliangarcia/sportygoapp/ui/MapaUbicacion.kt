@@ -189,9 +189,15 @@ private suspend fun buscarDireccion(context: Context, lat: Double, lon: Double):
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 suspendCancellableCoroutine { cont ->
-                    geocoder.getFromLocation(lat, lon, 1) { lista ->
-                        if (cont.isActive) cont.resume(lista.firstOrNull())
-                    }
+                    geocoder.getFromLocation(lat, lon, 1, object : Geocoder.GeocodeListener {
+                        override fun onGeocode(lista: MutableList<Address>) {
+                            if (cont.isActive) cont.resume(lista.firstOrNull())
+                        }
+                        // Sin esto, un error del servicio dejaba la búsqueda colgada.
+                        override fun onError(mensaje: String?) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    })
                 }
             } else {
                 @Suppress("DEPRECATION")
@@ -228,6 +234,74 @@ suspend fun direccionDe(context: Context, punto: GeoPoint): String? =
             .joinToString(", ")
             .ifEmpty { null }
     }
+
+/** Un resultado de buscar una dirección escrita: texto para mostrar y su punto en el mapa. */
+data class ResultadoDireccion(val texto: String, val punto: GeoPoint)
+
+/**
+ * Busca una dirección escrita (ej. "Calle 10 #43-20, Medellín") y devuelve hasta [max]
+ * coincidencias. Si se conoce un punto [cerca] (ej. la ubicación del usuario), primero busca
+ * en sus alrededores para priorizar resultados de la misma ciudad. Lista vacía si no hay
+ * conexión, no hay servicio de geocodificación o no se encontró nada.
+ */
+suspend fun buscarDirecciones(
+    context: Context,
+    consulta: String,
+    cerca: GeoPoint? = null,
+    max: Int = 5
+): List<ResultadoDireccion> {
+    if (!Geocoder.isPresent() || consulta.isBlank()) return emptyList()
+    val geocoder = Geocoder(context, Locale.getDefault())
+
+    // caja = [latSO, lonSO, latNE, lonNE] o null para buscar en todo el mundo.
+    suspend fun buscar(caja: DoubleArray?): List<Address> = withContext(Dispatchers.IO) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                suspendCancellableCoroutine { cont ->
+                    val listener = object : Geocoder.GeocodeListener {
+                        override fun onGeocode(lista: MutableList<Address>) {
+                            if (cont.isActive) cont.resume(lista)
+                        }
+                        override fun onError(mensaje: String?) {
+                            if (cont.isActive) cont.resume(emptyList())
+                        }
+                    }
+                    if (caja == null) {
+                        geocoder.getFromLocationName(consulta, max, listener)
+                    } else {
+                        geocoder.getFromLocationName(
+                            consulta, max, caja[0], caja[1], caja[2], caja[3], listener
+                        )
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                if (caja == null) {
+                    geocoder.getFromLocationName(consulta, max)
+                } else {
+                    geocoder.getFromLocationName(consulta, max, caja[0], caja[1], caja[2], caja[3])
+                }.orEmpty()
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    // ~50 km alrededor del punto conocido; si ahí no hay nada, búsqueda general.
+    val cercanos = cerca?.let {
+        buscar(doubleArrayOf(it.latitude - 0.5, it.longitude - 0.5, it.latitude + 0.5, it.longitude + 0.5))
+    }.orEmpty()
+    val direcciones = cercanos.ifEmpty { buscar(null) }
+
+    return direcciones
+        .filter { it.hasLatitude() && it.hasLongitude() }
+        .map { d ->
+            val texto = d.getAddressLine(0)
+                ?: listOfNotNull(d.featureName, d.locality, d.adminArea).distinct().joinToString(", ")
+            ResultadoDireccion(texto, GeoPoint(d.latitude, d.longitude))
+        }
+        .distinctBy { it.texto }
+}
 
 /** Una cancha dibujada en el mapa. */
 data class MarcadorCancha(val id: String, val punto: GeoPoint, val titulo: String)
